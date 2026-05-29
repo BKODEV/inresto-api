@@ -16,13 +16,17 @@ class PermissionSeeder extends Seeder
      * @var array<string, string[]>
      */
     private array $permissions = [
-        'point-de-vente'              => ['view', 'create', 'update', 'delete'],
-        'categorie-produit'           => ['view', 'create', 'update', 'delete'],
-        'categorie-matiere-premiere'  => ['view', 'create', 'update', 'delete'],
-        'unite-de-mesure'             => ['view', 'create', 'update', 'delete'],
+        'point-de-vente' => ['view', 'create', 'update', 'delete'],
+        'categorie-produit' => ['view', 'create', 'update', 'delete'],
+        'categorie-matiere-premiere' => ['view', 'create', 'update', 'delete'],
+        'unite-de-mesure' => ['view', 'create', 'update', 'delete'],
         'mode-de-paiement' => ['view', 'create', 'update', 'delete'],
-        'caisse'           => ['view', 'create', 'update', 'delete'],
-        'carte'            => ['view', 'create', 'update', 'delete'],
+        'caisse' => ['view', 'create', 'update', 'delete'],
+        'carte' => ['view', 'create', 'update', 'delete'],
+        'fournisseur' => ['view', 'create', 'update', 'delete'],
+        'matiere-premiere' => ['view', 'create', 'update', 'delete'],
+        'catalogue-fournisseur' => ['view', 'create', 'update', 'delete'],
+        'budget' => ['view', 'create', 'update', 'delete'],
     ];
 
     public function run(): void
@@ -32,7 +36,7 @@ class PermissionSeeder extends Seeder
         foreach ($this->permissions as $feature => $actions) {
             foreach ($actions as $action) {
                 Permission::firstOrCreate([
-                    'name'       => "{$feature}.{$action}",
+                    'name' => "{$feature}.{$action}",
                     'guard_name' => 'api',
                 ]);
             }

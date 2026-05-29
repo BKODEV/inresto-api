@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\CategorieMatierePremiere;
 
-use App\Models\CategorieMatierePremiere;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -12,7 +11,7 @@ class StoreCategorieMatierePremireRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return $this->user()->can('create', CategorieMatierePremiere::class);
+        return true;
     }
 
     /**
@@ -21,7 +20,7 @@ class StoreCategorieMatierePremireRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'libelle'     => ['required', 'string', 'max:255'],
+            'libelle' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
         ];
     }

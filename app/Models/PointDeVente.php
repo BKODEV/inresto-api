@@ -24,8 +24,12 @@ class PointDeVente extends Model
         'statut',
     ];
 
+    protected $attributes = [
+        'statut' => Statut::Actif->value,
+    ];
+
     protected $casts = [
-        'type'   => PointDeVenteType::class,
+        'type' => PointDeVenteType::class,
         'statut' => Statut::class,
     ];
 

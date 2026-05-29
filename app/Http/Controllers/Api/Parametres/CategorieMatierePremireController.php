@@ -16,8 +16,6 @@ class CategorieMatierePremireController extends Controller
 {
     public function index(): JsonResponse
     {
-        $this->authorize('viewAny', CategorieMatierePremiere::class);
-
         return ApiResponse::success(
             CategorieMatierePremireResource::collection(CategorieMatierePremiere::all()),
             'Catégories matière première récupérées.'

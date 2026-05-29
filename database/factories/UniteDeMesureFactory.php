@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\Statut;
 use App\Models\UniteDeMesure;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -18,7 +19,9 @@ class UniteDeMesureFactory extends Factory
     public function definition(): array
     {
         return [
-            //
+            'libelle' => fake()->unique()->word(),
+            'symbole' => fake()->unique()->lexify('??'),
+            'statut' => Statut::Actif->value,
         ];
     }
 }

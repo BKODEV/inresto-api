@@ -22,6 +22,10 @@ class Carte extends Model
         'statut',
     ];
 
+    protected $attributes = [
+        'statut' => CarteStatut::Brouillon->value,
+    ];
+
     protected $casts = [
         'statut' => CarteStatut::class,
     ];

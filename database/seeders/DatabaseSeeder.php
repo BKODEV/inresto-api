@@ -15,5 +15,10 @@ class DatabaseSeeder extends Seeder
             PermissionSeeder::class,
             SuperAdminSeeder::class,
         ]);
+
+        // Données de démonstration : uniquement hors production.
+        if (! app()->isProduction()) {
+            $this->call(DemoSeeder::class);
+        }
     }
 }

@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\Statut;
 use App\Models\ModeDePaiement;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -11,14 +12,18 @@ use Illuminate\Database\Eloquent\Factories\Factory;
 class ModeDePaiementFactory extends Factory
 {
     /**
-     * Define the model's default state.
-     *
      * @return array<string, mixed>
      */
     public function definition(): array
     {
         return [
-            //
+            'libelle' => fake()->randomElement(['Espèces', 'Carte bancaire', 'Mobile Money', 'Virement', 'Chèque']),
+            'statut' => Statut::Actif->value,
         ];
+    }
+
+    public function inactif(): static
+    {
+        return $this->state(['statut' => Statut::Inactif->value]);
     }
 }
