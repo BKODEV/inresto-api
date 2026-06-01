@@ -29,10 +29,10 @@ class UpdateBudgetRequest extends FormRequest
         $mois = $this->input('mois', $budget->mois?->toDateString());
 
         return [
-            'point_de_vente_id' => [
+            'site_id' => [
                 'sometimes',
                 'integer',
-                'exists:points_de_vente,id',
+                'exists:sites,id',
                 Rule::unique('budgets')
                     ->where(fn ($query) => $query->whereDate('mois', $mois))
                     ->ignore($budget->id),
@@ -59,7 +59,7 @@ class UpdateBudgetRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'point_de_vente_id.unique' => 'Un budget existe déjà pour ce point de vente sur ce mois.',
+            'site_id.unique' => 'Un budget existe déjà pour ce site sur ce mois.',
         ];
     }
 }

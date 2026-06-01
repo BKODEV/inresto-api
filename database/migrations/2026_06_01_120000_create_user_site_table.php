@@ -8,19 +8,23 @@ return new class extends Migration
 {
     /**
      * Run the migrations.
+     *
+     * Périmètre d'un utilisateur = le SITE (et non le point de vente). Le PDV
+     * appartenant à exactement un site, le site d'un PDV reste déductible.
      */
     public function up(): void
     {
-        Schema::create('users_points_de_vente', function (Blueprint $table) {
+        Schema::create('user_site', function (Blueprint $table) {
             $table->id();
             $table->foreignUuid('user_id')
                 ->constrained('users')
                 ->cascadeOnDelete();
-            $table->foreignId('point_de_vente_id')
-                ->constrained('points_de_vente')
+            $table->foreignId('site_id')
+                ->constrained('sites')
                 ->cascadeOnDelete();
+            $table->boolean('est_principal')->default(false); // site de rattachement principal
 
-            $table->unique(['user_id', 'point_de_vente_id']);
+            $table->unique(['user_id', 'site_id']);
         });
     }
 
@@ -29,6 +33,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('users_points_de_vente');
+        Schema::dropIfExists('user_site');
     }
 };

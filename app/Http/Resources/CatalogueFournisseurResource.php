@@ -20,6 +20,7 @@ class CatalogueFournisseurResource extends JsonResource
             'matiere_premiere_id' => $this->matiere_premiere_id,
             'prix_unitaire' => $this->prix_unitaire,
             'unite_achat_id' => $this->unite_achat_id,
+            'qte_par_unite_achat' => $this->qte_par_unite_achat,
             'fournisseur' => new FournisseurResource($this->whenLoaded('fournisseur')),
             'matiere_premiere' => new MatierePremiereResource($this->whenLoaded('matierePremiere')),
             'unite_achat' => new UniteDeMesureResource($this->whenLoaded('uniteAchat')),

@@ -11,14 +11,14 @@ class DatabaseSeeder extends Seeder
 
     public function run(): void
     {
+        // Seeders = données par défaut RÉELLES uniquement (pas de factory).
+        // Les données de démonstration se génèrent via : php artisan inresto:demo
+        // SiteSeeder avant SuperAdminSeeder : le super-admin est rattaché au
+        // site PRINCIPAL, qui doit donc déjà exister.
         $this->call([
             PermissionSeeder::class,
+            SiteSeeder::class,
             SuperAdminSeeder::class,
         ]);
-
-        // Données de démonstration : uniquement hors production.
-        if (! app()->isProduction()) {
-            $this->call(DemoSeeder::class);
-        }
     }
 }

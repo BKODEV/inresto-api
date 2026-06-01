@@ -21,10 +21,12 @@ class CatalogueFournisseur extends Model
         'matiere_premiere_id',
         'prix_unitaire',
         'unite_achat_id',
+        'qte_par_unite_achat',
     ];
 
     protected $casts = [
         'prix_unitaire' => 'decimal:2',
+        'qte_par_unite_achat' => 'decimal:3',
     ];
 
     public function fournisseur(): BelongsTo

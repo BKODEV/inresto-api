@@ -24,10 +24,11 @@ class StorePointDeVenteRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'nom'         => ['required', 'string', 'max:255'],
-            'type'        => ['required', Rule::enum(PointDeVenteType::class)],
+            'site_id' => ['required', 'integer', 'exists:sites,id'],
+            'nom' => ['required', 'string', 'max:255'],
+            'type' => ['required', Rule::enum(PointDeVenteType::class)],
             'description' => ['nullable', 'string'],
-            'statut'      => ['sometimes', Rule::enum(Statut::class)],
+            'statut' => ['sometimes', Rule::enum(Statut::class)],
         ];
     }
 }

@@ -1,8 +1,9 @@
 <?php
 
+use App\Exceptions\CommandeFournisseurException;
 use App\Helpers\ApiResponse;
-use Illuminate\Auth\AuthenticationException;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -21,6 +22,10 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
 
+        $exceptions->render(function (CommandeFournisseurException $e) {
+            return ApiResponse::custom($e->status, 'error', $e->getMessage());
+        });
+
         $exceptions->render(function (ValidationException $e) {
             return ApiResponse::unprocessableEntity(
                 $e->errors(),
@@ -38,6 +43,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $exceptions->render(function (ModelNotFoundException $e) {
             $model = class_basename($e->getModel());
+
             return ApiResponse::notFound("Ressource {$model} introuvable.");
         });
 

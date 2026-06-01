@@ -16,7 +16,7 @@ return new class extends Migration
             $table->foreignId('matiere_premiere_id')
                 ->constrained('matieres_premieres')
                 ->restrictOnDelete();
-            $table->foreignId('user_id')
+            $table->foreignUuid('user_id')
                 ->nullable()
                 ->constrained('users')
                 ->nullOnDelete(); // obligatoire pour mouvements manuels, null si auto
@@ -31,18 +31,19 @@ return new class extends Migration
                 'correction_inventaire',
             ]);
 
-            $table->decimal('quantite', 10, 3); // toujours positive ; le sens dépend du type
-            $table->decimal('pmp_au_moment', 10, 2)->default(0); // valorisation à l'instant T
+            $table->decimal('quantite', 12, 3); // toujours positive ; le sens dépend du type
+            $table->decimal('pmp_au_moment', 12, 4)->default(0); // valorisation (coût unitaire) à l'instant T
 
             $table->timestamp('date_mouvement')->useCurrent();
 
             // Référence polymorphe vers l'origine (reception, ligne_commande_client, inventaire...)
             $table->string('reference_type')->nullable();
             $table->unsignedBigInteger('reference_id')->nullable();
-
+            $table->foreignId('site_id')->after('matiere_premiere_id')->constrained('sites')->restrictOnDelete();
             $table->text('note')->nullable();
             $table->timestamp('created_at')->useCurrent();
 
+            $table->index(['site_id', 'matiere_premiere_id', 'date_mouvement']);
             $table->index(['matiere_premiere_id', 'date_mouvement']);
             $table->index(['reference_type', 'reference_id']);
         });

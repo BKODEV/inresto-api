@@ -24,10 +24,10 @@ class StoreBudgetRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'point_de_vente_id' => [
+            'site_id' => [
                 'required',
                 'integer',
-                'exists:points_de_vente,id',
+                'exists:sites,id',
                 Rule::unique('budgets')->where(
                     fn ($query) => $query->whereDate('mois', $this->input('mois'))
                 ),
@@ -54,7 +54,7 @@ class StoreBudgetRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'point_de_vente_id.unique' => 'Un budget existe déjà pour ce point de vente sur ce mois.',
+            'site_id.unique' => 'Un budget existe déjà pour ce site sur ce mois.',
         ];
     }
 }

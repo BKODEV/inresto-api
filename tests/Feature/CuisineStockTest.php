@@ -7,7 +7,7 @@ use App\Models\CatalogueFournisseur;
 use App\Models\CategorieMatierePremiere;
 use App\Models\Fournisseur;
 use App\Models\MatierePremiere;
-use App\Models\PointDeVente;
+use App\Models\Site;
 use App\Models\UniteDeMesure;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -47,30 +47,28 @@ it('refuse l\'accès aux matières premières sans authentification', function (
     getJson('/api/matieres-premieres')->assertUnauthorized();
 });
 
-it('crée une matière première sans toucher au stock ni au pmp', function () {
+it('crée une matière première (le stock est géré par site, pas ici)', function () {
     actingAsUserAvec(['matiere-premiere.create']);
 
     postJson('/api/matieres-premieres', [
         'categorie_id' => CategorieMatierePremiere::factory()->create()->id,
         'unite_de_mesure_id' => UniteDeMesure::factory()->create()->id,
         'libelle' => 'Farine T55',
-        // tentative d'injection de colonnes en lecture seule
+        // tentative d'injection de colonnes inexistantes : doit être ignorée
         'stock_courant' => 999,
         'pmp' => 999,
     ])
         ->assertCreated()
         ->assertJsonPath('data.libelle', 'Farine T55')
-        ->assertJsonPath('data.stock_courant', '0.000')
-        ->assertJsonPath('data.pmp', '0.00');
+        ->assertJsonMissingPath('data.stock_courant')
+        ->assertJsonMissingPath('data.pmp');
 
-    $this->assertDatabaseHas('matieres_premieres', [
-        'libelle' => 'Farine T55',
-        'stock_courant' => 0,
-        'pmp' => 0,
-    ]);
+    $this->assertDatabaseHas('matieres_premieres', ['libelle' => 'Farine T55']);
+    // Aucune ligne de stock n'est créée par le simple CRUD de la matière.
+    $this->assertDatabaseCount('stocks', 0);
 });
 
-it('ignore stock_courant et pmp lors d\'une mise à jour', function () {
+it('met à jour une matière première sans créer de stock', function () {
     actingAsUserAvec(['matiere-premiere.update']);
     $matiere = MatierePremiere::factory()->create();
 
@@ -83,9 +81,8 @@ it('ignore stock_courant et pmp lors d\'une mise à jour', function () {
     $this->assertDatabaseHas('matieres_premieres', [
         'id' => $matiere->id,
         'libelle' => 'Nouveau libellé',
-        'stock_courant' => 0,
-        'pmp' => 0,
     ]);
+    $this->assertDatabaseCount('stocks', 0);
 });
 
 it('recherche les matières premières par libellé et filtre par catégorie et statut', function () {
@@ -115,7 +112,27 @@ it('crée une ligne de catalogue', function () {
         'matiere_premiere_id' => MatierePremiere::factory()->create()->id,
         'prix_unitaire' => 12.50,
         'unite_achat_id' => UniteDeMesure::factory()->create()->id,
-    ])->assertCreated();
+        'qte_par_unite_achat' => 25,
+    ])->assertCreated()
+        ->assertJsonPath('data.qte_par_unite_achat', '25.000');
+});
+
+it('exige qte_par_unite_achat et le refuse s\'il est nul ou négatif', function () {
+    actingAsUserAvec(['catalogue-fournisseur.create']);
+    $base = [
+        'fournisseur_id' => Fournisseur::factory()->create()->id,
+        'matiere_premiere_id' => MatierePremiere::factory()->create()->id,
+        'prix_unitaire' => 10,
+        'unite_achat_id' => UniteDeMesure::factory()->create()->id,
+    ];
+
+    postJson('/api/catalogue-fournisseur', $base)
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('qte_par_unite_achat');
+
+    postJson('/api/catalogue-fournisseur', [...$base, 'qte_par_unite_achat' => 0])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('qte_par_unite_achat');
 });
 
 it('refuse un doublon fournisseur + matière première', function () {
@@ -127,6 +144,7 @@ it('refuse un doublon fournisseur + matière première', function () {
         'matiere_premiere_id' => $ligne->matiere_premiere_id,
         'prix_unitaire' => 5,
         'unite_achat_id' => UniteDeMesure::factory()->create()->id,
+        'qte_par_unite_achat' => 1,
     ])
         ->assertUnprocessable()
         ->assertJsonValidationErrors('fournisseur_id');
@@ -143,8 +161,8 @@ it('remplace tout le catalogue d\'un fournisseur via la synchronisation', functi
 
     putJson("/api/fournisseurs/{$fournisseur->id}/catalogue", [
         'lignes' => [
-            ['matiere_premiere_id' => $m1->id, 'prix_unitaire' => 10, 'unite_achat_id' => $unite->id],
-            ['matiere_premiere_id' => $m2->id, 'prix_unitaire' => 20, 'unite_achat_id' => $unite->id],
+            ['matiere_premiere_id' => $m1->id, 'prix_unitaire' => 10, 'unite_achat_id' => $unite->id, 'qte_par_unite_achat' => 1],
+            ['matiere_premiere_id' => $m2->id, 'prix_unitaire' => 20, 'unite_achat_id' => $unite->id, 'qte_par_unite_achat' => 12],
         ],
     ])->assertOk();
 
@@ -173,8 +191,8 @@ it('refuse une matière première en doublon dans la synchronisation', function 
 
     putJson("/api/fournisseurs/{$fournisseur->id}/catalogue", [
         'lignes' => [
-            ['matiere_premiere_id' => $m->id, 'prix_unitaire' => 10, 'unite_achat_id' => $unite->id],
-            ['matiere_premiere_id' => $m->id, 'prix_unitaire' => 20, 'unite_achat_id' => $unite->id],
+            ['matiere_premiere_id' => $m->id, 'prix_unitaire' => 10, 'unite_achat_id' => $unite->id, 'qte_par_unite_achat' => 1],
+            ['matiere_premiere_id' => $m->id, 'prix_unitaire' => 20, 'unite_achat_id' => $unite->id, 'qte_par_unite_achat' => 1],
         ],
     ])
         ->assertUnprocessable()
@@ -187,7 +205,7 @@ it('crée un budget pour le premier jour du mois', function () {
     actingAsUserAvec(['budget.create']);
 
     postJson('/api/budgets', [
-        'point_de_vente_id' => PointDeVente::factory()->create()->id,
+        'site_id' => Site::factory()->create()->id,
         'mois' => '2026-06-01',
         'montant_alloue' => 15000,
     ])
@@ -199,7 +217,7 @@ it('rejette un mois qui n\'est pas le premier du mois', function () {
     actingAsUserAvec(['budget.create']);
 
     postJson('/api/budgets', [
-        'point_de_vente_id' => PointDeVente::factory()->create()->id,
+        'site_id' => Site::factory()->create()->id,
         'mois' => '2026-06-15',
         'montant_alloue' => 15000,
     ])
@@ -207,17 +225,17 @@ it('rejette un mois qui n\'est pas le premier du mois', function () {
         ->assertJsonValidationErrors('mois');
 });
 
-it('refuse un budget en doublon pour un point de vente et un mois', function () {
+it('refuse un budget en doublon pour un site et un mois', function () {
     actingAsUserAvec(['budget.create']);
     $budget = Budget::factory()->create(['mois' => '2026-06-01']);
 
     postJson('/api/budgets', [
-        'point_de_vente_id' => $budget->point_de_vente_id,
+        'site_id' => $budget->site_id,
         'mois' => '2026-06-01',
         'montant_alloue' => 20000,
     ])
         ->assertUnprocessable()
-        ->assertJsonValidationErrors('point_de_vente_id');
+        ->assertJsonValidationErrors('site_id');
 });
 
 it('supprime un budget', function () {

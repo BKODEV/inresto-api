@@ -39,6 +39,7 @@ class UpdateCatalogueFournisseurRequest extends FormRequest
             'matiere_premiere_id' => ['sometimes', 'integer', 'exists:matieres_premieres,id'],
             'prix_unitaire' => ['sometimes', 'numeric', 'min:0'],
             'unite_achat_id' => ['sometimes', 'integer', 'exists:unites_de_mesure,id'],
+            'qte_par_unite_achat' => ['sometimes', 'numeric', 'gt:0'],
         ];
     }
 

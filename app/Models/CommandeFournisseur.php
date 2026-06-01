@@ -1,0 +1,66 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Models;
+
+use App\Enums\StatutCommandeFournisseur;
+use Database\Factories\CommandeFournisseurFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+/**
+ * Commande fournisseur.
+ *
+ * `numero`, `statut` et `montant_previsionnel` sont gérés exclusivement par le
+ * CommandeFournisseurService : volontairement hors `$fillable` pour empêcher
+ * leur écriture via mass assignment depuis l'API.
+ *
+ * Une commande N'ÉCRIT JAMAIS dans le stock : le stock ne bouge qu'à la
+ * réception (module dédié).
+ */
+class CommandeFournisseur extends Model
+{
+    /** @use HasFactory<CommandeFournisseurFactory> */
+    use HasFactory;
+
+    protected $table = 'commandes_fournisseur';
+
+    protected $fillable = [
+        'fournisseur_id',
+        'date_commande',
+        'notes',
+    ];
+
+    protected $attributes = [
+        'montant_previsionnel' => 0,
+    ];
+
+    protected $casts = [
+        'date_commande' => 'date',
+        'montant_previsionnel' => 'decimal:2',
+        'statut' => StatutCommandeFournisseur::class,
+    ];
+
+    public function fournisseur(): BelongsTo
+    {
+        return $this->belongsTo(Fournisseur::class);
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    public function lignes(): HasMany
+    {
+        return $this->hasMany(LigneCommandeFournisseur::class);
+    }
+
+    public function estModifiable(): bool
+    {
+        return $this->statut->estModifiable();
+    }
+}

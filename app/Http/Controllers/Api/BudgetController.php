@@ -17,17 +17,17 @@ use Illuminate\Http\Request;
 class BudgetController extends Controller
 {
     /**
-     * Liste les budgets (filtre par point de vente, pagination).
+     * Liste les budgets (filtre par site, pagination).
      */
     public function index(Request $request): JsonResponse
     {
         $this->authorize('viewAny', Budget::class);
 
         $budgets = Budget::query()
-            ->with('pointDeVente')
+            ->with('site')
             ->when(
-                $request->filled('point_de_vente_id'),
-                fn (Builder $query) => $query->where('point_de_vente_id', $request->integer('point_de_vente_id'))
+                $request->filled('site_id'),
+                fn (Builder $query) => $query->where('site_id', $request->integer('site_id'))
             )
             ->orderByDesc('mois')
             ->paginate($request->integer('per_page', 15));
@@ -49,7 +49,7 @@ class BudgetController extends Controller
     public function store(StoreBudgetRequest $request): JsonResponse
     {
         $budget = Budget::create($request->validated());
-        $budget->load('pointDeVente');
+        $budget->load('site');
 
         return ApiResponse::created(
             new BudgetResource($budget),
@@ -64,7 +64,7 @@ class BudgetController extends Controller
     {
         $this->authorize('view', $budget);
 
-        $budget->load('pointDeVente');
+        $budget->load('site');
 
         return ApiResponse::success(
             new BudgetResource($budget),
@@ -78,7 +78,7 @@ class BudgetController extends Controller
     public function update(UpdateBudgetRequest $request, Budget $budget): JsonResponse
     {
         $budget->update($request->validated());
-        $budget->load('pointDeVente');
+        $budget->load('site');
 
         return ApiResponse::updated(
             new BudgetResource($budget),

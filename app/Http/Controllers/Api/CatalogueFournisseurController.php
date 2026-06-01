@@ -112,7 +112,7 @@ class CatalogueFournisseurController extends Controller
      */
     public function sync(SyncCatalogueFournisseurRequest $request, Fournisseur $fournisseur): JsonResponse
     {
-        /** @var array<int, array{matiere_premiere_id: int, prix_unitaire: float|string, unite_achat_id: int}> $lignes */
+        /** @var array<int, array{matiere_premiere_id: int, prix_unitaire: float|string, unite_achat_id: int, qte_par_unite_achat: float|string}> $lignes */
         $lignes = $request->validated()['lignes'];
 
         $catalogue = DB::transaction(function () use ($fournisseur, $lignes) {
@@ -124,6 +124,7 @@ class CatalogueFournisseurController extends Controller
                     'matiere_premiere_id' => $ligne['matiere_premiere_id'],
                     'prix_unitaire' => $ligne['prix_unitaire'],
                     'unite_achat_id' => $ligne['unite_achat_id'],
+                    'qte_par_unite_achat' => $ligne['qte_par_unite_achat'],
                 ]);
             }
 

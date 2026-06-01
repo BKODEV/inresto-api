@@ -17,6 +17,7 @@ return new class extends Migration
             $table->string('type'); // 'Lounge' ou 'Restaurant'
             $table->text('description')->nullable();
             $table->enum('statut', ['actif', 'inactif'])->default('actif');
+            $table->foreignId('site_id')->after('id')->constrained('sites')->restrictOnDelete();
             $table->timestamps();
         });
     }

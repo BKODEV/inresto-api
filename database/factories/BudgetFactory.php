@@ -3,7 +3,7 @@
 namespace Database\Factories;
 
 use App\Models\Budget;
-use App\Models\PointDeVente;
+use App\Models\Site;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -17,7 +17,7 @@ class BudgetFactory extends Factory
     public function definition(): array
     {
         return [
-            'point_de_vente_id' => PointDeVente::factory(),
+            'site_id' => Site::factory(),
             'mois' => now()->startOfMonth()->toDateString(),
             'montant_alloue' => fake()->randomFloat(2, 1000, 100000),
             'seuil_alerte_75' => true,

@@ -21,9 +21,7 @@ class MatierePremiereResource extends JsonResource
             'libelle' => $this->libelle,
             'seuil_alerte_stock' => $this->seuil_alerte_stock,
             'gestion_peremption' => $this->gestion_peremption,
-            // Lecture seule : alimentés par le StockService, non modifiables via le CRUD.
-            'stock_courant' => $this->stock_courant,
-            'pmp' => $this->pmp,
+            // Le stock (stock_courant/pmp) est par site, exposé via la table `stocks`.
             'statut' => $this->statut->value,
             'categorie' => new CategorieMatierePremireResource($this->whenLoaded('categorie')),
             'unite' => new UniteDeMesureResource($this->whenLoaded('unite')),

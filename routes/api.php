@@ -3,7 +3,9 @@
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BudgetController;
 use App\Http\Controllers\Api\CatalogueFournisseurController;
+use App\Http\Controllers\Api\CommandeFournisseurController;
 use App\Http\Controllers\Api\FournisseurController;
+use App\Http\Controllers\Api\LigneCommandeFournisseurController;
 use App\Http\Controllers\Api\MatierePremiereController;
 use App\Http\Controllers\Api\Parametres\CaisseController;
 use App\Http\Controllers\Api\Parametres\CarteController;
@@ -39,6 +41,19 @@ Route::middleware('auth:sanctum')->group(function () {
         ->parameters(['catalogue-fournisseur' => 'catalogue_fournisseur']);
 
     Route::apiResource('budgets', BudgetController::class);
+
+    Route::apiResource('commandes-fournisseur', CommandeFournisseurController::class)
+        ->parameters(['commandes-fournisseur' => 'commande_fournisseur']);
+    Route::post('commandes-fournisseur/{commande_fournisseur}/envoyer', [CommandeFournisseurController::class, 'envoyer'])
+        ->name('commandes-fournisseur.envoyer');
+    Route::post('commandes-fournisseur/{commande_fournisseur}/annuler', [CommandeFournisseurController::class, 'annuler'])
+        ->name('commandes-fournisseur.annuler');
+    Route::post('commandes-fournisseur/{commande_fournisseur}/lignes', [LigneCommandeFournisseurController::class, 'store'])
+        ->name('commandes-fournisseur.lignes.store');
+    Route::put('commandes-fournisseur/{commande_fournisseur}/lignes/{ligne}', [LigneCommandeFournisseurController::class, 'update'])
+        ->name('commandes-fournisseur.lignes.update');
+    Route::delete('commandes-fournisseur/{commande_fournisseur}/lignes/{ligne}', [LigneCommandeFournisseurController::class, 'destroy'])
+        ->name('commandes-fournisseur.lignes.destroy');
 
     Route::prefix('parametres')->name('parametres.')->group(function () {
         Route::apiResource('categories-produit', CategorieProduitController::class)

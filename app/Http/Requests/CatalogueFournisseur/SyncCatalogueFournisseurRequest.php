@@ -25,6 +25,7 @@ class SyncCatalogueFournisseurRequest extends FormRequest
             'lignes.*.matiere_premiere_id' => ['required', 'integer', 'exists:matieres_premieres,id', 'distinct'],
             'lignes.*.prix_unitaire' => ['required', 'numeric', 'min:0'],
             'lignes.*.unite_achat_id' => ['required', 'integer', 'exists:unites_de_mesure,id'],
+            'lignes.*.qte_par_unite_achat' => ['required', 'numeric', 'gt:0'],
         ];
     }
 

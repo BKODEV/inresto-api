@@ -5,6 +5,7 @@ namespace Database\Factories;
 use App\Enums\PointDeVenteType;
 use App\Enums\Statut;
 use App\Models\PointDeVente;
+use App\Models\Site;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -18,10 +19,11 @@ class PointDeVenteFactory extends Factory
     public function definition(): array
     {
         return [
-            'nom'         => fake()->company(),
-            'type'        => fake()->randomElement(PointDeVenteType::cases())->value,
+            'site_id' => Site::factory(),
+            'nom' => fake()->company(),
+            'type' => fake()->randomElement(PointDeVenteType::cases())->value,
             'description' => fake()->optional()->sentence(),
-            'statut'      => Statut::Actif->value,
+            'statut' => Statut::Actif->value,
         ];
     }
 

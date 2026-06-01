@@ -9,6 +9,7 @@ use App\Enums\Statut;
 use Database\Factories\PointDeVenteFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class PointDeVente extends Model
 {
@@ -18,6 +19,7 @@ class PointDeVente extends Model
     use HasFactory;
 
     protected $fillable = [
+        'site_id',
         'nom',
         'type',
         'description',
@@ -32,6 +34,11 @@ class PointDeVente extends Model
         'type' => PointDeVenteType::class,
         'statut' => Statut::class,
     ];
+
+    public function site(): BelongsTo
+    {
+        return $this->belongsTo(Site::class);
+    }
 
     public function isActif(): bool
     {

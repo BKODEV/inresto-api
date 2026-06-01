@@ -13,9 +13,7 @@ return new class extends Migration
     {
         Schema::create('budgets', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('point_de_vente_id')
-                ->constrained('points_de_vente')
-                ->restrictOnDelete();
+            $table->foreignId('site_id')->constrained('sites')->restrictOnDelete();
             $table->date('mois'); // premier jour du mois concerné
             $table->decimal('montant_alloue', 12, 2);
             $table->boolean('seuil_alerte_75')->default(true);
@@ -23,7 +21,7 @@ return new class extends Migration
             $table->boolean('seuil_alerte_100')->default(true);
             $table->timestamps();
 
-            $table->unique(['point_de_vente_id', 'mois']);
+            $table->unique(['site_id', 'mois']);
         });
     }
 

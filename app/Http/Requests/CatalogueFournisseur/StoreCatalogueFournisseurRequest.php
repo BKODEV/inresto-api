@@ -33,6 +33,8 @@ class StoreCatalogueFournisseurRequest extends FormRequest
             'matiere_premiere_id' => ['required', 'integer', 'exists:matieres_premieres,id'],
             'prix_unitaire' => ['required', 'numeric', 'min:0'],
             'unite_achat_id' => ['required', 'integer', 'exists:unites_de_mesure,id'],
+            // Combien d'unités de stockage dans 1 unité d'achat (> 0 : sert de diviseur à la réception).
+            'qte_par_unite_achat' => ['required', 'numeric', 'gt:0'],
         ];
     }
 

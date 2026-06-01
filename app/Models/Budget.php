@@ -17,7 +17,7 @@ class Budget extends Model
     protected $table = 'budgets';
 
     protected $fillable = [
-        'point_de_vente_id',
+        'site_id',
         'mois',
         'montant_alloue',
         'seuil_alerte_75',
@@ -33,8 +33,8 @@ class Budget extends Model
         'seuil_alerte_100' => 'boolean',
     ];
 
-    public function pointDeVente(): BelongsTo
+    public function site(): BelongsTo
     {
-        return $this->belongsTo(PointDeVente::class);
+        return $this->belongsTo(Site::class);
     }
 }

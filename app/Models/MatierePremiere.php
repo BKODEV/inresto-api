@@ -9,6 +9,7 @@ use Database\Factories\MatierePremiereFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class MatierePremiere extends Model
@@ -21,8 +22,8 @@ class MatierePremiere extends Model
     /**
      * Colonnes modifiables via l'API.
      *
-     * Volontairement, `stock_courant` et `pmp` ne figurent PAS dans le fillable :
-     * ce sont des caches alimentés uniquement par le StockService (mouvements de stock).
+     * Définition GLOBALE : la matière première ne porte plus de stock_courant/pmp.
+     * Le stock est par site et vit dans la table `stocks` (voir {@see Stock}).
      */
     protected $fillable = [
         'categorie_id',
@@ -35,15 +36,11 @@ class MatierePremiere extends Model
 
     protected $attributes = [
         'statut' => Statut::Actif->value,
-        'stock_courant' => 0,
-        'pmp' => 0,
     ];
 
     protected $casts = [
         'seuil_alerte_stock' => 'decimal:3',
         'gestion_peremption' => 'boolean',
-        'stock_courant' => 'decimal:3',
-        'pmp' => 'decimal:2',
         'statut' => Statut::class,
     ];
 
@@ -55,6 +52,14 @@ class MatierePremiere extends Model
     public function unite(): BelongsTo
     {
         return $this->belongsTo(UniteDeMesure::class, 'unite_de_mesure_id');
+    }
+
+    /**
+     * Lignes de stock de cette matière, une par site.
+     */
+    public function stocks(): HasMany
+    {
+        return $this->hasMany(Stock::class);
     }
 
     public function isActif(): bool

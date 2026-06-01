@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -43,9 +44,20 @@ class User extends Authenticatable
 
     protected $casts = [
         'email_verified_at' => 'datetime',
-        'last_login_at'     => 'datetime',
-        'password'          => 'hashed',
+        'last_login_at' => 'datetime',
+        'password' => 'hashed',
     ];
+
+    /**
+     * Sites auxquels l'utilisateur est rattaché. Le périmètre métier de
+     * l'utilisateur est défini au niveau du site (cuisine/stock/budget partagés),
+     * pas du point de vente. `est_principal` marque le site de rattachement principal.
+     */
+    public function sites(): BelongsToMany
+    {
+        return $this->belongsToMany(Site::class, 'user_site')
+            ->withPivot('est_principal');
+    }
 
     // Connexion par identifiant au lieu de email
     public function getAuthIdentifierName(): string

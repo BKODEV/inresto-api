@@ -15,13 +15,15 @@ class PointDeVenteResource extends JsonResource
     public function toArray(Request $request): array
     {
         return [
-            'id'          => $this->id,
-            'nom'         => $this->nom,
-            'type'        => $this->type->value,
+            'id' => $this->id,
+            'site_id' => $this->site_id,
+            'nom' => $this->nom,
+            'type' => $this->type->value,
             'description' => $this->description,
-            'statut'      => $this->statut->value,
-            'created_at'  => $this->created_at?->toIso8601String(),
-            'updated_at'  => $this->updated_at?->toIso8601String(),
+            'statut' => $this->statut->value,
+            'site' => new SiteResource($this->whenLoaded('site')),
+            'created_at' => $this->created_at?->toIso8601String(),
+            'updated_at' => $this->updated_at?->toIso8601String(),
         ];
     }
 }

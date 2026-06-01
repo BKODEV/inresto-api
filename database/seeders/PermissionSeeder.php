@@ -26,6 +26,7 @@ class PermissionSeeder extends Seeder
         'fournisseur' => ['view', 'create', 'update', 'delete'],
         'matiere-premiere' => ['view', 'create', 'update', 'delete'],
         'catalogue-fournisseur' => ['view', 'create', 'update', 'delete'],
+        'commande-fournisseur' => ['view', 'create', 'update', 'delete'],
         'budget' => ['view', 'create', 'update', 'delete'],
     ];
 
