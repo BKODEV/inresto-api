@@ -125,6 +125,37 @@ it('confirme une réception complète : commande cloturée, stock du site et dé
         ->and((float) $depense->montant)->toBe(50.0);
 });
 
+it('rattache le mouvement de stock à la ligne de réception (reference_type = lignes_reception)', function () {
+    $fournisseur = Fournisseur::factory()->create();
+    $site = siteAvecBudget();
+    ['matiere' => $matiere, 'unite' => $unite] = matiereCataloguee($fournisseur);
+
+    $commande = commandeEnvoyee($fournisseur, [[
+        'matiere_premiere_id' => $matiere->id,
+        'unite_id' => $unite->id,
+        'quantite_commandee' => 10,
+        'prix_unitaire_previsionnel' => 4,
+    ]]);
+    $reception = Reception::factory()->create(['commande_fournisseur_id' => $commande->id, 'site_id' => $site->id]);
+
+    $this->service->confirmer($reception, [[
+        'matiere_premiere_id' => $matiere->id,
+        'unite_id' => $unite->id,
+        'quantite_recue' => 10,
+        'prix_unitaire_reel' => 4,
+    ]], $this->userId);
+
+    $ligne = $reception->lignes()->first();
+    $mouvement = MouvementStock::where('reference_type', 'lignes_reception')
+        ->where('reference_id', $ligne->id)
+        ->first();
+
+    expect($mouvement)->not->toBeNull()
+        ->and($mouvement->type->value)->toBe('entree_reception')
+        // La relation polymorphe se résout bien vers la ligne de réception.
+        ->and($mouvement->reference)->toBeInstanceOf(LigneReception::class);
+});
+
 // ───────────────────────── réception partielle ─────────────────────────
 
 it('passe la commande en partiellement_recue quand la réception est incomplète', function () {

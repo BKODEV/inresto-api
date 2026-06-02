@@ -23,11 +23,7 @@ class LigneReception extends Model
 
     protected $table = 'lignes_reception';
 
-    /**
-     * Type morphologique stable stocké dans `mouvements_stock.reference_type`,
-     * indépendant du namespace de la classe.
-     */
-    protected $morphClass = 'lignes_reception';
+    // Alias morphologique (`lignes_reception`) défini dans AppServiceProvider::boot().
 
     protected $fillable = [
         'reception_id',

@@ -36,14 +36,7 @@ class LigneInventaire extends Model
         'ecart' => 'decimal:3',
     ];
 
-    /**
-     * Type morphologique stable stocké dans `mouvements_stock.reference_type`,
-     * indépendant du namespace de la classe.
-     */
-    public function getMorphClass(): string
-    {
-        return 'lignes_inventaire';
-    }
+    // Alias morphologique (`lignes_inventaire`) défini dans AppServiceProvider::boot().
 
     public function inventaire(): BelongsTo
     {
