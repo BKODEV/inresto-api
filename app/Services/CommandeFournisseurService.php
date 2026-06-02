@@ -280,11 +280,11 @@ class CommandeFournisseurService
     }
 
     /**
-     * Point d'extension du module réception (étape 3) : à brancher sur la table
-     * des réceptions. Pour l'instant, aucune réception n'existe.
+     * Vrai dès qu'au moins une réception est rattachée à la commande. Bloque
+     * l'annulation d'une commande déjà réceptionnée.
      */
-    private function aDesReceptions(CommandeFournisseur $_commande): bool
+    private function aDesReceptions(CommandeFournisseur $commande): bool
     {
-        return false;
+        return $commande->receptions()->exists();
     }
 }

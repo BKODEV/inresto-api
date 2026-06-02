@@ -10,9 +10,12 @@ use App\Http\Requests\Budget\StoreBudgetRequest;
 use App\Http\Requests\Budget\UpdateBudgetRequest;
 use App\Http\Resources\BudgetResource;
 use App\Models\Budget;
+use App\Models\Site;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class BudgetController extends Controller
 {
@@ -25,6 +28,7 @@ class BudgetController extends Controller
 
         $budgets = Budget::query()
             ->with('site')
+            ->withSum('depenses', 'montant')
             ->when(
                 $request->filled('site_id'),
                 fn (Builder $query) => $query->where('site_id', $request->integer('site_id'))
@@ -96,5 +100,62 @@ class BudgetController extends Controller
         $budget->delete();
 
         return ApiResponse::deleted('Budget supprimé avec succès.');
+    }
+
+    /**
+     * Liste les budgets d'un site, chacun avec ses champs de consommation
+     * calculés. Pas de pagination forcée ; support optionnel de ?per_page.
+     */
+    public function indexForSite(Request $request, Site $site): JsonResponse
+    {
+        $this->authorize('viewAny', Budget::class);
+
+        $query = $site->budgets()
+            ->withSum('depenses', 'montant')
+            ->orderByDesc('mois');
+
+        if ($request->filled('per_page')) {
+            $budgets = $query->paginate($request->integer('per_page'));
+
+            return ApiResponse::success([
+                'budgets' => BudgetResource::collection($budgets->items()),
+                'pagination' => [
+                    'total' => $budgets->total(),
+                    'par_page' => $budgets->perPage(),
+                    'page_courante' => $budgets->currentPage(),
+                    'derniere_page' => $budgets->lastPage(),
+                ],
+            ], 'Budgets du site récupérés.');
+        }
+
+        return ApiResponse::success(
+            ['budgets' => BudgetResource::collection($query->get())],
+            'Budgets du site récupérés.'
+        );
+    }
+
+    /**
+     * Résumé de consommation d'un budget de site pour un mois donné (YYYY-MM).
+     * 404 si aucun budget pour ce couple site/mois.
+     */
+    public function showForSiteMonth(Site $site, string $mois): JsonResponse
+    {
+        $this->authorize('viewAny', Budget::class);
+
+        $premierDuMois = Carbon::createFromFormat('Y-m-d', $mois.'-01')->startOfMonth();
+
+        $budget = $site->budgets()
+            ->whereDate('mois', $premierDuMois->toDateString())
+            ->with(['site', 'depenses'])
+            ->first();
+
+        if ($budget === null) {
+            throw new NotFoundHttpException("Aucun budget pour le site #{$site->id} sur le mois {$mois}.");
+        }
+
+        return ApiResponse::success(
+            new BudgetResource($budget),
+            'Budget récupéré.'
+        );
     }
 }

@@ -1,6 +1,10 @@
 <?php
 
 use App\Exceptions\CommandeFournisseurException;
+use App\Exceptions\FicheTechniqueException;
+use App\Exceptions\InventaireException;
+use App\Exceptions\ReceptionException;
+use App\Exceptions\SousRecetteException;
 use App\Helpers\ApiResponse;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
@@ -23,6 +27,22 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withExceptions(function (Exceptions $exceptions): void {
 
         $exceptions->render(function (CommandeFournisseurException $e) {
+            return ApiResponse::custom($e->status, 'error', $e->getMessage());
+        });
+
+        $exceptions->render(function (ReceptionException $e) {
+            return ApiResponse::custom($e->status, 'error', $e->getMessage());
+        });
+
+        $exceptions->render(function (SousRecetteException $e) {
+            return ApiResponse::custom($e->status, 'error', $e->getMessage());
+        });
+
+        $exceptions->render(function (FicheTechniqueException $e) {
+            return ApiResponse::custom($e->status, 'error', $e->getMessage());
+        });
+
+        $exceptions->render(function (InventaireException $e) {
             return ApiResponse::custom($e->status, 'error', $e->getMessage());
         });
 

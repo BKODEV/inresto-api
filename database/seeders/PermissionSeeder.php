@@ -27,7 +27,12 @@ class PermissionSeeder extends Seeder
         'matiere-premiere' => ['view', 'create', 'update', 'delete'],
         'catalogue-fournisseur' => ['view', 'create', 'update', 'delete'],
         'commande-fournisseur' => ['view', 'create', 'update', 'delete'],
+        'reception' => ['view', 'create', 'update', 'delete'],
         'budget' => ['view', 'create', 'update', 'delete'],
+        'depense' => ['view', 'create', 'update', 'delete'],
+        'sousrecette' => ['view', 'create', 'update', 'delete'],
+        'fichetechnique' => ['view', 'create', 'update', 'delete'],
+        'inventaire' => ['view', 'create', 'update', 'delete'],
     ];
 
     public function run(): void

@@ -59,6 +59,11 @@ class CommandeFournisseur extends Model
         return $this->hasMany(LigneCommandeFournisseur::class);
     }
 
+    public function receptions(): HasMany
+    {
+        return $this->hasMany(Reception::class);
+    }
+
     public function estModifiable(): bool
     {
         return $this->statut->estModifiable();
