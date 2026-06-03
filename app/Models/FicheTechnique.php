@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\CarteStatut;
+use App\Enums\Statut;
 use App\Enums\StatutFicheTechnique;
 use Database\Factories\FicheTechniqueFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -65,12 +67,16 @@ class FicheTechnique extends Model
     }
 
     /**
-     * Point d'extension du Module Salle : à brancher sur le pivot carte_produit
-     * (cartes.statut = active). Tant que carte_produit n'existe pas, aucune
-     * fiche n'est référencée par une carte active.
+     * Vrai si le produit de cette fiche figure (ligne carte_produit active) dans
+     * au moins une carte ACTIVE. Bloque la suppression de la fiche : la carte en
+     * dépend.
      */
     public function estReferenceeDansCarteActive(): bool
     {
-        return false;
+        return CarteProduit::query()
+            ->where('produit_id', $this->produit_id)
+            ->where('statut', Statut::Actif->value)
+            ->whereHas('carte', fn ($query) => $query->where('statut', CarteStatut::Active->value))
+            ->exists();
     }
 }

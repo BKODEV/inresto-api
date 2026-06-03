@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BudgetController;
+use App\Http\Controllers\Api\CarteProduitController;
 use App\Http\Controllers\Api\CatalogueFournisseurController;
 use App\Http\Controllers\Api\CommandeFournisseurController;
 use App\Http\Controllers\Api\DepenseController;
@@ -17,8 +18,12 @@ use App\Http\Controllers\Api\Parametres\CategorieProduitController;
 use App\Http\Controllers\Api\Parametres\ModeDePaiementController;
 use App\Http\Controllers\Api\Parametres\UniteDeMesureController;
 use App\Http\Controllers\Api\PointDeVenteController;
+use App\Http\Controllers\Api\ProduitController;
 use App\Http\Controllers\Api\ReceptionController;
+use App\Http\Controllers\Api\SessionCaisseController;
+use App\Http\Controllers\Api\SiteController;
 use App\Http\Controllers\Api\SousRecetteController;
+use App\Http\Controllers\Api\TableSalleController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function () {
@@ -31,6 +36,11 @@ Route::prefix('auth')->group(function () {
 });
 
 Route::middleware('auth:sanctum')->group(function () {
+    // Périmètre métier de l'utilisateur connecté (sélecteur de site).
+    // Déclaré avant la ressource pour ne pas être capté par sites/{site}.
+    Route::get('sites/perimetre', [SiteController::class, 'perimetre'])->name('sites.perimetre');
+    Route::apiResource('sites', SiteController::class);
+
     Route::apiResource('points-de-vente', PointDeVenteController::class)
         ->parameters(['points-de-vente' => 'point_de_vente']);
 
@@ -80,6 +90,26 @@ Route::middleware('auth:sanctum')->group(function () {
         ->name('fiches-techniques.historique');
     Route::apiResource('fiches-techniques', FicheTechniqueController::class)
         ->parameters(['fiches-techniques' => 'fiche_technique']);
+
+    // Module Salle — Produits (définition partagée) + produits sur une carte.
+    Route::apiResource('produits', ProduitController::class)
+        ->parameters(['produits' => 'produit']);
+    Route::apiResource('cartes.produits', CarteProduitController::class)
+        ->only(['index', 'store', 'update', 'destroy'])
+        ->parameters(['cartes' => 'carte', 'produits' => 'carte_produit']);
+
+    // Module Salle — Tables de salle (CRUD par PDV + changement de statut manuel).
+    Route::apiResource('tables', TableSalleController::class)
+        ->parameters(['tables' => 'table']);
+    Route::patch('tables/{table}/statut', [TableSalleController::class, 'changerStatut'])
+        ->name('tables.statut');
+
+    // Module Salle — Sessions de caisse (ouverture/fermeture).
+    Route::apiResource('sessions-caisse', SessionCaisseController::class)
+        ->only(['index', 'store', 'show'])
+        ->parameters(['sessions-caisse' => 'session']);
+    Route::post('sessions-caisse/{session}/fermer', [SessionCaisseController::class, 'fermer'])
+        ->name('sessions-caisse.fermer');
 
     Route::apiResource('inventaires', InventaireController::class)
         ->only(['index', 'store', 'show', 'destroy']);

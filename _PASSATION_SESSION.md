@@ -8,7 +8,11 @@
 > stock multi-site + commande fournisseur). Le dernier commit ajoute le
 > correctif morph map, l'enrichissement de `inresto:demo` et les tests associés.
 >
-> **État : 150 tests passent (370 assertions), Pint clean.**
+> **⚠️ NON committé** : exposition + CRUD des **sites** (backend, §4), le câblage
+> du **front Angular** (§5), le **Module Salle — Lot A : Produits & Carte-Produit**
+> (§6) ET le **Lot B : Tables & Sessions de caisse** (§7). À relire et committer.
+>
+> **État : 198 tests passent (488 assertions), Pint clean.**
 
 ---
 
@@ -112,93 +116,139 @@ Règle d'or : **DÉFINITIONS PARTAGÉES, OPÉRATIONS RATTACHÉES AU SITE.**
 6. **Migrations éditées en place** quand pertinent (BD reconstruite via `migrate:fresh`) ; altérations OK (précédents : `qte_par_unite_achat`, `receptions.site_id`).
 7. **Seeders = défauts réels** (`db:seed`), **démo = factories via `inresto:demo`** — à enrichir à chaque module.
 8. **Réponses API** : enveloppe `ApiResponse` `{status, message, data}`. `destroy` renvoie 200 via `ApiResponse::deleted()`.
-9. **Points d'extension en attente du Module Salle** : `FicheTechnique::estReferenceeDansCarteActive()` (pivot `carte_produit` à créer), CRUD/API `produits`.
+9. ~~**Points d'extension en attente du Module Salle**~~ → **CÂBLÉS** (§6) : `FicheTechnique::estReferenceeDansCarteActive()` interroge désormais `carte_produit` ; CRUD/API `produits` livré. **Prix de vente porté par `carte_produit`, jamais par le produit** (décision structurante, cf. `NOTES-DE-GESTION.md`).
+10. **Sites = périmètre utilisateur** (relation `user_site`, `est_principal`). La liaison historique user↔point de vente est **obsolète** : tout passe par le site. Le sélecteur d'opérations lit le **périmètre** de l'utilisateur, pas tous les sites.
 
 ---
 
-## 4. Où on s'est arrêté — PROCHAINES ÉTAPES (backend)
+## 4. SESSION COURANTE — Sites exposés + CRUD (backend, NON committé)
 
-1. **Module Salle** (gros morceau) : CRUD/API `produits` (+ prix de vente), pivot `carte_produit`, câblage de `estReferenceeDansCarteActive()` + test « fiche référencée → 409 », et probablement le déstockage à la vente (lignes de vente → `StockService::sortie`).
-2. **Endpoints lecture stock par site** (`stock_courant`/`pmp`) — toujours pas exposés.
-3. **CRUD `/api/sites`** + exposition du périmètre utilisateur.
+> Motivation : le front a besoin de la liste des sites (toutes les opérations sont rattachées à `site_id`), or rien ne l'exposait. Validé avec l'utilisateur : implémenter le manque backend.
+
+- **`AuthController::transformUser`** renvoie désormais `sites[]` (id, nom, code, statut, **`est_principal`** via pivot) dans `/auth/me` ET au login. `SiteResource` expose `est_principal` via `whenPivotLoaded('user_site', …)`.
+- **`SiteController`** = ressource complète + méthode `perimetre` :
+  - `GET /api/sites/perimetre` → **sites actifs de l'utilisateur connecté** (principal en tête). **AUCUNE permission** (périmètre = ses propres sites). → alimente le **sélecteur d'opérations** du front.
+  - `apiResource sites` (`GET /api/sites` = TOUS les sites pour la gestion, `store/show/update/destroy`) protégé par **`SitePolicy`** (`site.view/create/update/delete`).
+  - ⚠️ Routes : `sites/perimetre` déclarée **AVANT** `apiResource` (sinon captée par `sites/{site}`).
+  - `destroy` renvoie **409** si le site porte des points de vente / budgets / stock (intégrité).
+- **`StoreSiteRequest` / `UpdateSiteRequest`** : `nom` requis, `code` unique ≤20, `adresse` nullable, `statut` enum.
+- **`PermissionSeeder`** : ajout de `'site' => [view, create, update, delete]`. ⚠️ **À exécuter sur la BD** : `php artisan db:seed --class=PermissionSeeder` (idempotent) puis rattacher aux rôles.
+- Tests : `tests/Feature/SiteTest.php` (périmètre scoping, `/auth/me`, CRUD, 409 dépendances). **160 tests verts.**
+
+---
+
+## 5. SESSION COURANTE — Front Angular câblé (NON committé)
+
+> Dépôt **séparé** : `../inresto-app` (`/Users/bko/Projets/Innov-Immobilier/InResto/inresto-app`), **Angular 21**. Build : `npm run build`. Guide de navigation : `GUIDE_Structure_Navigation_InnResto.md` dans ce dépôt.
+
+**Conventions front** : composants standalone, `OnPush`, **signals**, `ReactiveFormsModule`, `takeUntilDestroyed` ; services `core/api/<module>/` (`HttpClient` + `map(r => r.data.<clé>)`, enveloppe `ApiResponse<T>`) ; décimaux reçus en **chaînes** ; pattern **drawer** pour le CRUD ; design-system global (`card`, `data-table`, `drawer*`, `field*`, `badge-*`, `btn-*`, `empty-state`) ; onglets via `param-tabs` + `routerLinkActive` ; garde-fous via `AuthService.hasPermission()`.
+
+**Pièges rencontrés (résolus)** :
+- Noms de permissions backend **hétérogènes** : `commande-fournisseur.*`, `matiere-premiere.*`, `point-de-vente.*`, `site.*` (tirets) mais `fichetechnique.*`, `sousrecette.*`, `reception.*`, `inventaire.*`, `depense.*` (collés). `menu.config.ts` corrigé.
+- Pas de `Number()` ni de globaux dans les templates Angular → passer par une méthode du composant.
+- Le budget front utilisait `point_de_vente_id` (obsolète) → migré vers `site_id` + champs de consommation.
+
+**Modules livrés** (par priorité métier) :
+- **Fondations** : `core/api/site` (service `perimetre()` vs `list()`), `core/site/selected-site.service` (site courant partagé, persisté localStorage), `AuthUser.sites`, routes + menu.
+- **Achats** : catalogue enrichi (`qte_par_unite_achat`) ; **commandes fournisseur** (`/cuisine/commandes` liste + fiche détail, machine à états envoyer/annuler, lignes en brouillon) ; **réceptions** (flux 2 temps depuis la fiche commande) ; **budgets** réécrits sur `site_id` (jauge consommation + `niveau_alerte`) + **dépenses** (charge hors stock).
+- **Recettes** (`/cuisine/fiches-techniques`, onglets) : **sous-recettes** (CRUD lignes) ; **fiches techniques** (versioning + historique). ⚠️ choix produit par **identifiant** (placeholder, pas d'API produits).
+- **Inventaires** (`/cuisine/stock`, 3 onglets) : **Inventaires** fonctionnel (création, saisie, clôture, rapport) ; onglets « État du stock » / « Mouvements » = **placeholder** (endpoints backend absents).
+- **Paramètres** : nouvel onglet **Sites** (CRUD) ; **Points de vente** complété avec `site_id`.
+
+**Sélecteur de site** : opérations (budget, inventaire, réception) → `SiteService.perimetre()` ; gestion (PDV, page Sites) → `SiteService.list()`.
+
+---
+
+## 6. SESSION COURANTE — Module Salle / Lot A : Produits & Carte-Produit (NON committé)
+
+> Démarrage du **Module Salle**. Livre le CRUD des produits, la gestion des
+> produits sur une carte (pivot `carte_produit`) et le câblage des points
+> d'extension laissés ouverts par le Lot 3. **178 tests verts, Pint clean.**
+
+- **Migration `produits` éditée EN PLACE** (convention #6) : ajout `description`,
+  `est_menu`, `photo`, `allergenes`, `softDeletes()`. **Nouvelle migration
+  `carte_produit`** : `carte_id` (cascade), `produit_id` (restrict), `prix_vente`
+  `decimal(10,2)`, `statut` (actif/inactif), **unique `(carte_id, produit_id)`**.
+- **Règle d'or** : le **prix de vente vit sur `carte_produit`, pas sur le produit**
+  (un même produit a des prix différents selon la carte). Cf. `NOTES-DE-GESTION.md`.
+- **`Produit`** : `SoftDeletes`, relation `cartesProduits()`, méthode
+  `estReferenceeDansFicheActive()` (fiches `statut = active`).
+- **`ProduitService`** : `creer`/`modifier`/`supprimer`. Suppression = soft delete
+  **refusée (409)** si le produit est en fiche technique active (`ProduitException`).
+- **`ProduitController`** (`apiResource produits`) : `index` filtres `?categorie_id`
+  + `?statut` (paginé), CRUD complet, `destroy` → `ApiResponse::deleted()`.
+- **`CarteProduitController`** sous **`/api/cartes/{carte}/produits`** (index, store,
+  update, destroy ; param `{produits}` → `carte_produit`) :
+  - `store` : produit doit être **actif** (sinon 422), **unicité** par carte (422) ;
+  - `update` : `prix_vente` et/ou `statut` (sert à **désactiver** une ligne) ;
+  - `destroy` : **409 si la carte est active** (`CarteProduitException`) — on
+    désactive plutôt que supprimer sur une carte servie ; OK si brouillon/archivée.
+- **`FicheTechnique::estReferenceeDansCarteActive()` CÂBLÉ** : `true` ssi une ligne
+  `carte_produit` active du produit appartient à une carte `active`. Le test
+  « destroy fiche → 409 quand produit sur carte active » passe au vert.
+- Resources (`ProduitResource` enrichie + `categorie`, `CarteProduitResource`),
+  4 FormRequests, `ProduitPolicy`/`CarteProduitPolicy`, `CarteProduitFactory`.
+- **`PermissionSeeder`** : ajout `produit.*` et `carte_produit.*` (⚠️ underscore).
+  **À exécuter sur la BD** : `php artisan db:seed --class=PermissionSeeder` puis
+  rattacher aux rôles.
+- Exceptions `ProduitException` / `CarteProduitException` rendues par `bootstrap/app.php`.
+- Tests : `tests/Feature/ProduitTest.php`, `tests/Feature/CarteProduitTest.php`.
+
+---
+
+## 7. SESSION COURANTE — Module Salle / Lot B : Tables & Sessions de caisse (NON committé)
+
+> Suite du **Module Salle**. Livre les tables de salle (CRUD par PDV) et les
+> sessions de caisse (ouverture/fermeture avec contrôle d'écart). **198 tests
+> verts, Pint clean.**
+
+- **Migrations** : `tables_salle` (PDV, `numero`, `capacite`, `statut` enum,
+  **unique `(point_de_vente_id, numero)`**) ; `sessions_caisse` (`caisse_id`,
+  `user_id` **foreignUuid**, `ouvert_le` useCurrent, `fonds_initial`, `ferme_le`,
+  `montant_theorique`/`montant_reel`/`ecart`, `statut` enum, `notes`).
+- **Une seule session OUVERTE par caisse** : garanti par un **index unique
+  PARTIEL** `CREATE UNIQUE INDEX ... WHERE statut = 'ouverte'` (syntaxe valable
+  PostgreSQL **ET** SQLite → fonctionne aussi en test), **doublé** d'un contrôle
+  applicatif `lockForUpdate` dans le service (renvoie un 409 propre).
+- Enums `StatutTable` (libre/occupee/reservee/a_debarrasser), `StatutSessionCaisse`
+  (ouverte/fermee).
+- **`TableSalle`** : `pointDeVente()`, point d'extension **`aDesCommandes()` → false**
+  (commandes_client absent). **`SessionCaisse`** : `caisse()`, `user()`, point
+  d'extension **`montantPaye()` → 0** (table paiements absente).
+- **`TableSalleService`** : `creer`/`modifier`/`supprimer` (garde-fou
+  `aDesCommandes()` → suppression autorisée pour l'instant) / `changerStatut`.
+- **`SessionCaisseService`** : `ouvrir` (refus 409 si déjà ouverte),
+  `fermer` (`montant_theorique = fonds_initial + montantPaye()`,
+  `ecart = reel − theorique`, `ferme_le = now`, statut fermee). **2 points
+  d'extension documentés (TODO Lot C)** : `montantPaye()` réel + contrôle d'accès
+  via `caisse → PDV → site` croisé `user_site` + permission `session_caisse.utiliser`.
+- **`TableSalleController`** : `apiResource tables` (param `{table}`) + `PATCH
+  tables/{table}/statut`. **`SessionCaisseController`** : `apiResource
+  sessions-caisse` (index `?caisse_id`, store=**ouvrir**, show) + `POST
+  sessions-caisse/{session}/fermer`.
+- Resources (`TableSalleResource` + PDV, `SessionCaisseResource` + caisse→PDV→site
+  + ouvreur inline), FormRequests (`montant_reel` **requis**, 0 accepté),
+  Policies, Factories.
+- **`PermissionSeeder`** : ajout `table.*` et `session_caisse.*` (dont
+  **`session_caisse.utiliser`** réservé au Lot C). ⚠️ **À exécuter sur la BD** :
+  `php artisan db:seed --class=PermissionSeeder` puis rattacher aux rôles.
+- Exceptions `TableSalleException` / `SessionCaisseException` rendues par `bootstrap/app.php`.
+- Tests : `tests/Feature/TableSalleTest.php`, `tests/Feature/SessionCaisseTest.php`.
+
+---
+
+## 8. Où on s'est arrêté — PROCHAINES ÉTAPES (backend)
+
+1. **Module Salle — Lot C (gros morceau)** : **commandes client** (rattachées à une
+   `table_salle` + une `session_caisse` ouverte), **paiements**, puis **déstockage à
+   la vente** (lignes de vente → `StockService::sortie`). Ce lot **câble les points
+   d'extension** laissés ouverts : `TableSalle::aDesCommandes()`,
+   `SessionCaisse::montantPaye()` (→ `montant_theorique` réel), et le **contrôle
+   d'accès** « utiliser une session » (`caisse → PDV → site` × `user_site` ×
+   permission `session_caisse.utiliser`). Reste aussi la logique **menus**
+   (`menu_produit`, au-delà du champ `est_menu`).
+   ~~CRUD `produits`, `carte_produit`, `estReferenceeDansCarteActive()`~~ → **FAIT (§6)**.
+   ~~Tables + sessions de caisse~~ → **FAIT (§7)**.
+2. **Endpoints lecture stock par site** (`stock_courant`/`pmp`) + **mouvements de stock** — toujours pas exposés. **Débloque les onglets placeholder « État du stock » / « Mouvements » du front.**
+3. ~~CRUD `/api/sites` + périmètre utilisateur~~ → **FAIT** (§4).
 4. PDF bon de commande (CDC 3.1.4) — reporté (moteur à trancher : dompdf vs Browsershot).
-
----
-
-## 5. 📋 PROMPT À COLLER DANS LA SESSION FRONT-END
-
-> Copier-coller tel quel dans la session Claude Code du dépôt **front-end**.
-
-```
-# Front InResto — Liaison API des modules Stock/Achats/Recettes/Inventaires
-
-## Contexte
-Le front ne couvre aujourd'hui que le CRUD de : paramètres, cartes, budgets,
-matières premières, fournisseurs. Le backend (API Laravel) a depuis livré
-plusieurs modules. Objectif : développer les écrans correspondants et les câbler
-à l'API, en respectant les conventions front déjà en place (structure, store,
-client HTTP, gestion auth/permissions).
-
-⚠️ Tu as accès au dépôt backend : n'INVENTE aucun endpoint. Lis-y la vérité —
-`routes/api.php` (chemins, noms, sous-routes), les FormRequests `app/Http/Requests/*`
-(payloads + règles de validation), les API Resources `app/Http/Resources/*`
-(forme exacte des réponses), et les Policies/permissions `app/Policies/*`. En cas
-de doute sur un contrat, c'est le backend qui fait foi.
-
-## Conventions transverses (vérifier dans le backend)
-- Auth Sanctum, token Bearer (`Authorization: Bearer <token>`). Récupérer les
-  permissions ET les sites de l'utilisateur connecté (voir AuthController/me).
-- Enveloppe de réponse : `{ status: "success"|"error", message, data }`.
-  Validation 422 : `data` remplacé par `errors:{champ:[...]}`. Erreurs métier
-  409/422 : afficher `message` tel quel.
-- Pagination : `data.<ressource>` + `data.pagination { total, par_page,
-  page_courante, derniere_page }`, query `?per_page`/`?page`.
-- Permissions au format `feature.action` : masquer/désactiver les actions selon
-  les permissions, gérer le 403.
-- Multi-site : les opérations rattachées à un site (réception, inventaire,
-  budget, dépense) portent un `site_id`. Prévoir un sélecteur de site basé sur
-  les sites de l'utilisateur.
-
-## Features à développer (comportement métier ; endpoints à lire dans le backend)
-
-1. **Points de vente** — CRUD (rattaché à un site).
-2. **Catalogue fournisseur** — édition par fournisseur (sync d'un tableau) et/ou
-   CRUD ; chaque ligne porte un facteur `qte_par_unite_achat`.
-3. **Commandes fournisseur** — CRUD + machine à états
-   (brouillon → envoyee → partiellement_recue → cloturee ; * sauf cloturee →
-   annulee). Modifiable UNIQUEMENT en brouillon ; actions envoyer/annuler ;
-   gestion des lignes en brouillon. Numéro et montant prévisionnel calculés côté
-   serveur (lecture seule).
-4. **Réceptions** — flux en 2 temps : créer l'entête (commande + site), puis
-   confirmer avec les lignes reçues. La confirmation met à jour le stock du site,
-   crée les dépenses d'achat et fait transiter la commande. Gérer les erreurs
-   métier (budget du site absent, facteur catalogue manquant).
-5. **Budgets enrichis + dépenses** — vue par site/mois avec consommation
-   (montant consommé/restant, pourcentage, niveau d'alerte
-   aucun/seuil_75/seuil_90/depassement) et liste des dépenses ; saisie de charges
-   hors stock. Afficher une jauge + alertes selon le niveau.
-6. **Sous-recettes** — CRUD avec synchronisation complète des lignes (matières).
-   Coût matière en lecture (calculé). Suppression bloquée si utilisée par une
-   fiche active.
-7. **Fiches techniques** — versioning : enregistrer crée la v1 ou archive
-   l'active et crée la version suivante. Lignes matières + lignes sous-recettes
-   (au moins une au total). Écran d'historique (toutes versions d'un produit),
-   affichage version/statut/coût de référence.
-   ⚠️ LIMITE BACKEND : pas encore d'endpoint `produits` (arrive au « Module
-   Salle »). Prévoir un placeholder pour le choix du produit et SIGNALER ce
-   manque — ne pas inventer d'endpoint produits.
-8. **Inventaires** — création (un seul « en cours » par site), saisie des lignes
-   (quantité physique, théorique indicatif), suppression de ligne, clôture
-   (irréversible → corrections de stock), écran de rapport (taux de couverture,
-   valeur totale, écarts). Lignes en lecture seule une fois clôturé.
-
-## Attendu
-- Couche service/API typée par module (réutiliser le client HTTP et la gestion
-  d'enveloppe/erreurs existante), endpoints repris du backend.
-- Écrans CRUD + workflows (états commande, confirmation réception, clôture
-  inventaire) avec garde-fous UI selon statut et permissions.
-- Gestion cohérente des erreurs métier (afficher `message`).
-- Respecter les conventions et le design system déjà en place.
-- Lister en fin de session les manques backend rencontrés (ex. endpoint
-  produits, lecture stock par site).
-```

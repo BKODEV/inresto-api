@@ -1,10 +1,14 @@
 <?php
 
+use App\Exceptions\CarteProduitException;
 use App\Exceptions\CommandeFournisseurException;
 use App\Exceptions\FicheTechniqueException;
 use App\Exceptions\InventaireException;
+use App\Exceptions\ProduitException;
 use App\Exceptions\ReceptionException;
+use App\Exceptions\SessionCaisseException;
 use App\Exceptions\SousRecetteException;
+use App\Exceptions\TableSalleException;
 use App\Helpers\ApiResponse;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
@@ -43,6 +47,22 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         $exceptions->render(function (InventaireException $e) {
+            return ApiResponse::custom($e->status, 'error', $e->getMessage());
+        });
+
+        $exceptions->render(function (ProduitException $e) {
+            return ApiResponse::custom($e->status, 'error', $e->getMessage());
+        });
+
+        $exceptions->render(function (CarteProduitException $e) {
+            return ApiResponse::custom($e->status, 'error', $e->getMessage());
+        });
+
+        $exceptions->render(function (TableSalleException $e) {
+            return ApiResponse::custom($e->status, 'error', $e->getMessage());
+        });
+
+        $exceptions->render(function (SessionCaisseException $e) {
             return ApiResponse::custom($e->status, 'error', $e->getMessage());
         });
 

@@ -5,10 +5,12 @@ namespace App\Http\Controllers\Api;
 use App\Helpers\ApiResponse;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
+use App\Models\Site;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class AuthController extends Controller
 {
@@ -37,12 +39,12 @@ class AuthController extends Controller
         $user->forceFill(['last_login_at' => now()])->save();
 
         $deviceName = $data['device_name'] ?? ($request->userAgent() ?? 'api');
-        $token      = $user->createToken($deviceName)->plainTextToken;
+        $token = $user->createToken($deviceName)->plainTextToken;
 
         return ApiResponse::success([
-            'token'      => $token,
+            'token' => $token,
             'token_type' => 'Bearer',
-            'user'       => $this->transformUser($user),
+            'user' => $this->transformUser($user),
         ], 'Connexion réussie.');
     }
 
@@ -65,7 +67,7 @@ class AuthController extends Controller
         /** @var User $user */
         $user = $request->user();
 
-        /** @var \Laravel\Sanctum\PersonalAccessToken|null $token */
+        /** @var PersonalAccessToken|null $token */
         $token = $user->currentAccessToken();
 
         $token?->delete();
@@ -79,17 +81,25 @@ class AuthController extends Controller
     private function transformUser(User $user): array
     {
         return [
-            'id'            => $user->getKey(),
-            'nom'           => $user->nom,
-            'prenom'        => $user->prenom,
-            'identifiant'   => $user->identifiant,
-            'email'         => $user->email,
-            'telephone'     => $user->telephone,
-            'photo'         => $user->photo,
-            'statut'        => $user->statut,
+            'id' => $user->getKey(),
+            'nom' => $user->nom,
+            'prenom' => $user->prenom,
+            'identifiant' => $user->identifiant,
+            'email' => $user->email,
+            'telephone' => $user->telephone,
+            'photo' => $user->photo,
+            'statut' => $user->statut,
             'last_login_at' => $user->last_login_at?->toIso8601String(),
-            'roles'         => $user->getRoleNames(),
-            'permissions'   => $user->getAllPermissions()->pluck('name'),
+            'roles' => $user->getRoleNames(),
+            'permissions' => $user->getAllPermissions()->pluck('name'),
+            // Périmètre métier : sites de rattachement de l'utilisateur (cuisine/stock/budget).
+            'sites' => $user->sites->map(fn (Site $site) => [
+                'id' => $site->id,
+                'nom' => $site->nom,
+                'code' => $site->code,
+                'statut' => $site->statut->value,
+                'est_principal' => (bool) $site->pivot->est_principal,
+            ])->values(),
         ];
     }
 }

@@ -20,6 +20,8 @@ class SiteResource extends JsonResource
             'code' => $this->code,
             'adresse' => $this->adresse,
             'statut' => $this->statut->value,
+            // Présent uniquement quand le site est lu via la relation user_site.
+            'est_principal' => $this->whenPivotLoaded('user_site', fn () => (bool) $this->pivot->est_principal),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
         ];

@@ -18,7 +18,12 @@ class ProduitResource extends JsonResource
             'id' => $this->id,
             'categorie_id' => $this->categorie_id,
             'libelle' => $this->libelle,
+            'description' => $this->description,
+            'est_menu' => $this->est_menu,
+            'photo' => $this->photo,
+            'allergenes' => $this->allergenes,
             'statut' => $this->statut->value,
+            'categorie' => new CategorieProduitResource($this->whenLoaded('categorie')),
         ];
     }
 }

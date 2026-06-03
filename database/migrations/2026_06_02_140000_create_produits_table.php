@@ -7,8 +7,9 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration
 {
     /**
-     * Table produits — version minimale (définition partagée). Le CRUD complet
-     * (controller/service, prix de vente, etc.) viendra avec le Module Salle.
+     * Table produits — définition PARTAGÉE (pas de site_id). Le prix de vente
+     * n'est PAS porté ici : il vit sur le pivot carte_produit (un même produit
+     * peut être vendu à des prix différents selon la carte).
      */
     public function up(): void
     {
@@ -16,8 +17,13 @@ return new class extends Migration
             $table->id();
             $table->foreignId('categorie_id')->nullable()->constrained('categories_produit')->nullOnDelete();
             $table->string('libelle');
+            $table->text('description')->nullable();
+            $table->boolean('est_menu')->default(false);
+            $table->string('photo')->nullable();
+            $table->text('allergenes')->nullable();
             $table->enum('statut', ['actif', 'inactif'])->default('actif');
             $table->timestamps();
+            $table->softDeletes();
         });
     }
 
