@@ -20,6 +20,7 @@ class CarteProduitResource extends JsonResource
             'produit_id' => $this->produit_id,
             'prix_vente' => $this->prix_vente,
             'statut' => $this->statut->value,
+            'ordre' => $this->ordre,
             'produit' => new ProduitResource($this->whenLoaded('produit')),
         ];
     }

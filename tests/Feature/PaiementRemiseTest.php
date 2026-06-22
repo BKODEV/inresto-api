@@ -1,0 +1,179 @@
+<?php
+
+declare(strict_types=1);
+
+use App\Enums\StatutCommandeClient;
+use App\Enums\StatutTable;
+use App\Models\CommandeClient;
+use App\Models\LigneCommandeClient;
+use App\Models\ModeDePaiement;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+
+use function Pest\Laravel\postJson;
+
+uses(RefreshDatabase::class);
+
+/**
+ * Commande servie avec une ligne (montant des lignes = quantite × prix).
+ * Réutilise les helpers globaux salleContext / actingAsServeur / produitSurCarte
+ * / commandeSur définis dans CommandeClientTest.
+ */
+function commandeServieAvecLigne(object $ctx, $user, float $prix, int $quantite): CommandeClient
+{
+    $produit = produitSurCarte($ctx, $prix);
+    $commande = commandeSur($ctx, $user, 'servie');
+    LigneCommandeClient::factory()->create([
+        'commande_client_id' => $commande->id,
+        'produit_id' => $produit->id,
+        'quantite' => $quantite,
+        'prix_unitaire' => $prix,
+    ]);
+
+    return $commande;
+}
+
+// ───────────────────────── paiements ─────────────────────────
+
+it('enregistre un paiement sur une commande servie', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['paiement.create', 'session_caisse.utiliser']);
+    $commande = commandeServieAvecLigne($ctx, $user, 50, 1);
+    $mode = ModeDePaiement::factory()->create();
+
+    postJson("/api/commandes-client/{$commande->id}/paiements", [
+        'mode_de_paiement_id' => $mode->id,
+        'montant' => 50,
+    ])->assertCreated();
+
+    expect($commande->montantPaye())->toBe(50.0);
+});
+
+it('refuse un paiement sur une commande ouverte (422)', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['paiement.create', 'session_caisse.utiliser']);
+    $produit = produitSurCarte($ctx, 10);
+    $commande = commandeSur($ctx, $user, 'ouverte');
+    LigneCommandeClient::factory()->create(['commande_client_id' => $commande->id, 'produit_id' => $produit->id, 'quantite' => 1, 'prix_unitaire' => 10]);
+    $mode = ModeDePaiement::factory()->create();
+
+    postJson("/api/commandes-client/{$commande->id}/paiements", [
+        'mode_de_paiement_id' => $mode->id,
+        'montant' => 10,
+    ])->assertStatus(422);
+});
+
+it('gère un paiement fractionné : reste_a_payer correct', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['paiement.create', 'session_caisse.utiliser']);
+    $commande = commandeServieAvecLigne($ctx, $user, 100, 1);
+    $mode = ModeDePaiement::factory()->create();
+
+    postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $mode->id, 'montant' => 60])->assertCreated();
+    postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $mode->id, 'montant' => 25])
+        ->assertCreated()
+        ->assertJsonPath('data.id', fn ($id) => $id !== null);
+
+    expect($commande->resteAPayer())->toBe(15.0);
+});
+
+it('câble SessionCaisse::montantPaye() sur les paiements de la session', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['paiement.create', 'session_caisse.utiliser']);
+    $commande = commandeServieAvecLigne($ctx, $user, 80, 1);
+    $mode = ModeDePaiement::factory()->create();
+
+    postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $mode->id, 'montant' => 80])->assertCreated();
+
+    expect($ctx->session->montantPaye())->toBe(80.0);
+});
+
+// ───────────────────────── remises ─────────────────────────
+
+it('applique une remise sous le seuil sans permission spéciale', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['remise.create', 'session_caisse.utiliser']);
+    $commande = commandeServieAvecLigne($ctx, $user, 100, 1);
+
+    postJson("/api/commandes-client/{$commande->id}/remises", [
+        'type' => 'pourcentage',
+        'valeur' => 10, // 10 % <= seuil 15
+    ])->assertCreated();
+
+    expect($commande->totalRemises())->toBe(10.0);
+});
+
+it('refuse une remise au-delà du seuil sans permission (403)', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['remise.create', 'session_caisse.utiliser']);
+    $commande = commandeServieAvecLigne($ctx, $user, 100, 1);
+
+    postJson("/api/commandes-client/{$commande->id}/remises", [
+        'type' => 'pourcentage',
+        'valeur' => 20, // 20 % > seuil 15
+    ])->assertStatus(403);
+});
+
+it('autorise une remise au-delà du seuil avec la permission', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['remise.create', 'remise.autoriser_au_dela_seuil', 'session_caisse.utiliser']);
+    $commande = commandeServieAvecLigne($ctx, $user, 100, 1);
+
+    postJson("/api/commandes-client/{$commande->id}/remises", [
+        'type' => 'pourcentage',
+        'valeur' => 20,
+    ])->assertCreated();
+});
+
+it('refuse une remise sur une commande encaissée (409)', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['remise.create', 'remise.autoriser_au_dela_seuil', 'session_caisse.utiliser']);
+    $commande = commandeServieAvecLigne($ctx, $user, 100, 1);
+    $commande->statut = StatutCommandeClient::Encaissee;
+    $commande->save();
+
+    postJson("/api/commandes-client/{$commande->id}/remises", [
+        'type' => 'pourcentage',
+        'valeur' => 5,
+    ])->assertStatus(409);
+});
+
+// ───────────────────────── encaissement ─────────────────────────
+
+it('refuse l\'encaissement s\'il reste à payer (422)', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['commande_client.encaisser', 'paiement.create', 'session_caisse.utiliser']);
+    $commande = commandeServieAvecLigne($ctx, $user, 100, 1);
+    $mode = ModeDePaiement::factory()->create();
+    postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $mode->id, 'montant' => 50])->assertCreated();
+
+    postJson("/api/commandes-client/{$commande->id}/encaisser")->assertStatus(422);
+});
+
+it('encaisse une commande soldée : statut encaissee, table à débarrasser', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['commande_client.encaisser', 'paiement.create', 'session_caisse.utiliser']);
+    $commande = commandeServieAvecLigne($ctx, $user, 100, 1);
+    $mode = ModeDePaiement::factory()->create();
+    postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $mode->id, 'montant' => 100])->assertCreated();
+
+    postJson("/api/commandes-client/{$commande->id}/encaisser")
+        ->assertOk()
+        ->assertJsonPath('data.statut', 'encaissee');
+
+    expect($commande->fresh()->statut->value)->toBe('encaissee')
+        ->and($ctx->table->fresh()->statut)->toBe(StatutTable::ADebarrasser);
+});
+
+// ───────────────────────── permissions ─────────────────────────
+
+it('refuse un paiement sans la permission paiement.create', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['session_caisse.utiliser']);
+    $commande = commandeServieAvecLigne($ctx, $user, 10, 1);
+    $mode = ModeDePaiement::factory()->create();
+
+    postJson("/api/commandes-client/{$commande->id}/paiements", [
+        'mode_de_paiement_id' => $mode->id,
+        'montant' => 10,
+    ])->assertForbidden();
+});

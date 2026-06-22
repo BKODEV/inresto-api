@@ -51,12 +51,11 @@ class User extends Authenticatable
     /**
      * Sites auxquels l'utilisateur est rattaché. Le périmètre métier de
      * l'utilisateur est défini au niveau du site (cuisine/stock/budget partagés),
-     * pas du point de vente. `est_principal` marque le site de rattachement principal.
+     * pas du point de vente.
      */
     public function sites(): BelongsToMany
     {
-        return $this->belongsToMany(Site::class, 'user_site')
-            ->withPivot('est_principal');
+        return $this->belongsToMany(Site::class, 'user_site');
     }
 
     // Connexion par identifiant au lieu de email

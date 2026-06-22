@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Enums\StatutCommandeFournisseur;
 use App\Exceptions\CommandeFournisseurException;
+use App\Models\CatalogueFournisseur;
 use App\Models\CommandeFournisseur;
 use App\Models\Fournisseur;
 use App\Models\MatierePremiere;
@@ -52,6 +53,21 @@ function ligneValide(array $surcharge = []): array
         'quantite_commandee' => 10,
         'prix_unitaire_previsionnel' => 2.5,
     ], $surcharge);
+}
+
+/**
+ * Ligne valide dont la matière est INSCRITE au catalogue du fournisseur — requis
+ * par la validation API (on ne commande qu'au catalogue du fournisseur).
+ */
+function ligneAuCatalogue(Fournisseur $fournisseur, array $surcharge = []): array
+{
+    $matiereId = $surcharge['matiere_premiere_id'] ?? MatierePremiere::factory()->create()->id;
+    CatalogueFournisseur::factory()->create([
+        'fournisseur_id' => $fournisseur->id,
+        'matiere_premiere_id' => $matiereId,
+    ]);
+
+    return ligneValide(array_merge($surcharge, ['matiere_premiere_id' => $matiereId]));
 }
 
 // ───────────────────────── enum / machine à états ─────────────────────────
@@ -191,7 +207,7 @@ it('crée une commande avec lignes via l\'API', function () {
     postJson('/api/commandes-fournisseur', [
         'fournisseur_id' => $fournisseur->id,
         'lignes' => [
-            ligneValide(['quantite_commandee' => 10, 'prix_unitaire_previsionnel' => 3]), // 30
+            ligneAuCatalogue($fournisseur, ['quantite_commandee' => 10, 'prix_unitaire_previsionnel' => 3]), // 30
         ],
     ])
         ->assertCreated()
@@ -200,6 +216,55 @@ it('crée une commande avec lignes via l\'API', function () {
         ->assertJsonPath('data.lignes.0.sous_total', 30);
 
     expect(CommandeFournisseur::count())->toBe(1);
+});
+
+it('refuse à la création une matière hors du catalogue du fournisseur (422)', function () {
+    actingAsCommandeUser(['commande-fournisseur.create']);
+    $fournisseur = Fournisseur::factory()->create();
+    $horsCatalogue = MatierePremiere::factory()->create(); // non rattachée au catalogue
+
+    postJson('/api/commandes-fournisseur', [
+        'fournisseur_id' => $fournisseur->id,
+        'lignes' => [ligneValide(['matiere_premiere_id' => $horsCatalogue->id])],
+    ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('lignes.0.matiere_premiere_id');
+
+    expect(CommandeFournisseur::count())->toBe(0);
+});
+
+it('refuse l\'ajout d\'une ligne hors du catalogue du fournisseur (422)', function () {
+    actingAsCommandeUser(['commande-fournisseur.update']);
+    $fournisseur = Fournisseur::factory()->create();
+    $commande = app(CommandeFournisseurService::class)->creer(
+        ['fournisseur_id' => $fournisseur->id],
+        [],
+        User::factory()->create()->id,
+    );
+    $horsCatalogue = MatierePremiere::factory()->create();
+
+    postJson("/api/commandes-fournisseur/{$commande->id}/lignes", ligneValide([
+        'matiere_premiere_id' => $horsCatalogue->id,
+    ]))
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('matiere_premiere_id');
+
+    expect($commande->fresh()->lignes)->toHaveCount(0);
+});
+
+it('accepte l\'ajout d\'une ligne présente au catalogue du fournisseur', function () {
+    actingAsCommandeUser(['commande-fournisseur.update']);
+    $fournisseur = Fournisseur::factory()->create();
+    $commande = app(CommandeFournisseurService::class)->creer(
+        ['fournisseur_id' => $fournisseur->id],
+        [],
+        User::factory()->create()->id,
+    );
+
+    postJson("/api/commandes-fournisseur/{$commande->id}/lignes", ligneAuCatalogue($fournisseur))
+        ->assertCreated();
+
+    expect($commande->fresh()->lignes)->toHaveCount(1);
 });
 
 it('envoie une commande via l\'API', function () {

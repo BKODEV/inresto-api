@@ -17,6 +17,7 @@ class PermissionSeeder extends Seeder
      */
     private array $permissions = [
         'site' => ['view', 'create', 'update', 'delete'],
+        'parametre_etablissement' => ['view', 'create', 'update', 'delete'],
         'point-de-vente' => ['view', 'create', 'update', 'delete'],
         'categorie-produit' => ['view', 'create', 'update', 'delete'],
         'categorie-matiere-premiere' => ['view', 'create', 'update', 'delete'],
@@ -28,6 +29,10 @@ class PermissionSeeder extends Seeder
         'carte_produit' => ['view', 'create', 'update', 'delete'],
         'table' => ['view', 'create', 'update', 'delete'],
         'session_caisse' => ['view', 'create', 'update', 'delete', 'utiliser'],
+        'commande_client' => ['view', 'create', 'update', 'delete', 'encaisser'],
+        'paiement' => ['view', 'create'],
+        'remise' => ['view', 'create', 'autoriser_au_dela_seuil'],
+        'annulation' => ['view', 'create'],
         'fournisseur' => ['view', 'create', 'update', 'delete'],
         'matiere-premiere' => ['view', 'create', 'update', 'delete'],
         'catalogue-fournisseur' => ['view', 'create', 'update', 'delete'],

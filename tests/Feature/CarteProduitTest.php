@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Models\Carte;
 use App\Models\CarteProduit;
+use App\Models\CategorieProduit;
 use App\Models\FicheTechnique;
 use App\Models\Produit;
 use App\Models\User;
@@ -12,6 +13,7 @@ use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 
 use function Pest\Laravel\deleteJson;
+use function Pest\Laravel\getJson;
 use function Pest\Laravel\patchJson;
 use function Pest\Laravel\postJson;
 
@@ -75,6 +77,121 @@ it('refuse l\'ajout d\'un produit inactif (422)', function () {
     ])
         ->assertUnprocessable()
         ->assertJsonValidationErrors('produit_id');
+});
+
+it('ajoute un produit avec un ordre et le restitue', function () {
+    actingAsCarteUser(['carte_produit.create']);
+    $carte = Carte::factory()->create();
+    $produit = Produit::factory()->create();
+
+    postJson("/api/cartes/{$carte->id}/produits", [
+        'produit_id' => $produit->id,
+        'prix_vente' => 12.50,
+        'ordre' => 3,
+    ])
+        ->assertCreated()
+        ->assertJsonPath('data.ordre', 3);
+});
+
+it('expose la catégorie du produit ajouté (corrige « sans catégorie »)', function () {
+    actingAsCarteUser(['carte_produit.create']);
+    $carte = Carte::factory()->create();
+    $categorie = CategorieProduit::factory()->create(['libelle' => 'Entrées']);
+    $produit = Produit::factory()->create(['categorie_id' => $categorie->id]);
+
+    postJson("/api/cartes/{$carte->id}/produits", [
+        'produit_id' => $produit->id,
+        'prix_vente' => 10,
+    ])
+        ->assertCreated()
+        ->assertJsonPath('data.produit.categorie.id', $categorie->id)
+        ->assertJsonPath('data.produit.categorie.libelle', 'Entrées');
+});
+
+// ───────────────────────── ordre : placement & décalage ─────────────────────────
+
+it('place les nouveaux produits en fin de section (1 puis 2) sans ordre fourni', function () {
+    actingAsCarteUser(['carte_produit.create']);
+    $carte = Carte::factory()->create();
+    $categorie = CategorieProduit::factory()->create();
+    $premier = Produit::factory()->create(['categorie_id' => $categorie->id]);
+    $second = Produit::factory()->create(['categorie_id' => $categorie->id]);
+
+    postJson("/api/cartes/{$carte->id}/produits", ['produit_id' => $premier->id, 'prix_vente' => 10])
+        ->assertCreated()
+        ->assertJsonPath('data.ordre', 1);
+
+    postJson("/api/cartes/{$carte->id}/produits", ['produit_id' => $second->id, 'prix_vente' => 10])
+        ->assertCreated()
+        ->assertJsonPath('data.ordre', 2);
+});
+
+it('décale les voisins quand on insère un produit à un ordre déjà occupé', function () {
+    actingAsCarteUser(['carte_produit.create']);
+    $carte = Carte::factory()->create();
+    $categorie = CategorieProduit::factory()->create();
+    $existant = Produit::factory()->create(['categorie_id' => $categorie->id]);
+    $nouveau = Produit::factory()->create(['categorie_id' => $categorie->id]);
+    $ligneExistante = CarteProduit::factory()->create([
+        'carte_id' => $carte->id,
+        'produit_id' => $existant->id,
+        'ordre' => 1,
+    ]);
+
+    postJson("/api/cartes/{$carte->id}/produits", [
+        'produit_id' => $nouveau->id,
+        'prix_vente' => 10,
+        'ordre' => 1,
+    ])
+        ->assertCreated()
+        ->assertJsonPath('data.ordre', 1);
+
+    expect($ligneExistante->fresh()->ordre)->toBe(2);
+});
+
+it('numérote l\'ordre indépendamment d\'une section à l\'autre', function () {
+    actingAsCarteUser(['carte_produit.create']);
+    $carte = Carte::factory()->create();
+    $entrees = CategorieProduit::factory()->create();
+    $plats = CategorieProduit::factory()->create();
+    $entree = Produit::factory()->create(['categorie_id' => $entrees->id]);
+    $plat = Produit::factory()->create(['categorie_id' => $plats->id]);
+
+    postJson("/api/cartes/{$carte->id}/produits", ['produit_id' => $entree->id, 'prix_vente' => 10])
+        ->assertJsonPath('data.ordre', 1);
+
+    // La section « Plats » repart à 1, sans tenir compte de la section « Entrées ».
+    postJson("/api/cartes/{$carte->id}/produits", ['produit_id' => $plat->id, 'prix_vente' => 10])
+        ->assertJsonPath('data.ordre', 1);
+});
+
+it('réinsère une ligne et décale ses voisins quand on change son ordre', function () {
+    actingAsCarteUser(['carte_produit.update']);
+    $carte = Carte::factory()->create();
+    $categorie = CategorieProduit::factory()->create();
+    $p1 = Produit::factory()->create(['categorie_id' => $categorie->id]);
+    $p2 = Produit::factory()->create(['categorie_id' => $categorie->id]);
+    $l1 = CarteProduit::factory()->create(['carte_id' => $carte->id, 'produit_id' => $p1->id, 'ordre' => 1]);
+    $l2 = CarteProduit::factory()->create(['carte_id' => $carte->id, 'produit_id' => $p2->id, 'ordre' => 2]);
+
+    patchJson("/api/cartes/{$carte->id}/produits/{$l2->id}", ['ordre' => 1])
+        ->assertOk()
+        ->assertJsonPath('data.ordre', 1);
+
+    expect($l1->fresh()->ordre)->toBe(2);
+    expect($l2->fresh()->ordre)->toBe(1);
+});
+
+it('liste les lignes triées par ordre croissant', function () {
+    actingAsCarteUser(['carte_produit.view']);
+    $carte = Carte::factory()->create();
+    $deuxieme = CarteProduit::factory()->create(['carte_id' => $carte->id, 'ordre' => 2]);
+    $premier = CarteProduit::factory()->create(['carte_id' => $carte->id, 'ordre' => 1]);
+
+    getJson("/api/cartes/{$carte->id}/produits")
+        ->assertOk()
+        ->assertJsonPath('data.produits.0.id', $premier->id)
+        ->assertJsonPath('data.produits.1.id', $deuxieme->id);
 });
 
 // ───────────────────────── modification ─────────────────────────

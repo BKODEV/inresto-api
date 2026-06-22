@@ -61,6 +61,27 @@ it('affiche un produit avec sa catégorie', function () {
         ->assertJsonPath('data.categorie.id', $produit->categorie_id);
 });
 
+it('affiche un produit avec sa fiche technique active embarquée', function () {
+    actingAsProduitUser(['produit.view']);
+    $produit = Produit::factory()->create();
+    $fiche = FicheTechnique::factory()->create(['produit_id' => $produit->id]);
+    FicheTechnique::factory()->archivee()->version(0)->create(['produit_id' => $produit->id]);
+
+    getJson("/api/produits/{$produit->id}")
+        ->assertOk()
+        ->assertJsonPath('data.fiche_technique.id', $fiche->id)
+        ->assertJsonPath('data.fiche_technique.statut', 'active');
+});
+
+it('renvoie une fiche technique nulle quand le produit n\'en a pas', function () {
+    actingAsProduitUser(['produit.view']);
+    $produit = Produit::factory()->create();
+
+    getJson("/api/produits/{$produit->id}")
+        ->assertOk()
+        ->assertJsonPath('data.fiche_technique', null);
+});
+
 it('modifie un produit', function () {
     actingAsProduitUser(['produit.update']);
     $produit = Produit::factory()->create();

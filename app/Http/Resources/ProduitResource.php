@@ -24,6 +24,14 @@ class ProduitResource extends JsonResource
             'allergenes' => $this->allergenes,
             'statut' => $this->statut->value,
             'categorie' => new CategorieProduitResource($this->whenLoaded('categorie')),
+            // Fiche technique active (avec lignes) quand la relation est chargée
+            // — null si le produit n'en a pas encore. Voir ProduitController@show.
+            'fiche_technique' => $this->when(
+                $this->relationLoaded('fichesTechniques'),
+                fn () => $this->fichesTechniques->isNotEmpty()
+                    ? new FicheTechniqueResource($this->fichesTechniques->first())
+                    : null
+            ),
         ];
     }
 }

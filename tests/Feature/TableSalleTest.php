@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Enums\StatutCommandeClient;
+use App\Models\CommandeClient;
 use App\Models\PointDeVente;
 use App\Models\TableSalle;
 use App\Models\User;
@@ -69,9 +71,7 @@ it('modifie une table', function () {
     expect($table->fresh()->capacite)->toBe(6);
 });
 
-it('supprime une table (200) — point d\'extension commandes renvoie false', function () {
-    // aDesCommandes() = false tant que commandes_client n'existe pas :
-    // la suppression est donc autorisée. Test documente ce comportement.
+it('supprime une table sans commande (200)', function () {
     actingAsTableUser(['table.delete']);
     $table = TableSalle::factory()->create();
 
@@ -79,6 +79,19 @@ it('supprime une table (200) — point d\'extension commandes renvoie false', fu
 
     expect(TableSalle::find($table->id))->toBeNull();
 });
+
+it('refuse de supprimer une table porteuse de commandes (409)', function (StatutCommandeClient $statut) {
+    actingAsTableUser(['table.delete']);
+    $table = TableSalle::factory()->create();
+    CommandeClient::factory()->create(['table_id' => $table->id, 'statut' => $statut->value]);
+
+    deleteJson("/api/tables/{$table->id}")->assertStatus(409);
+
+    expect(TableSalle::find($table->id))->not->toBeNull();
+})->with([
+    'commande active' => [StatutCommandeClient::Ouverte],
+    'commande historique (annulée)' => [StatutCommandeClient::Annulee],
+]);
 
 // ───────────────────────── unicité ─────────────────────────
 

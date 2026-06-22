@@ -2,6 +2,9 @@
 
 namespace App\Providers;
 
+use App\Models\Annulation;
+use App\Models\CommandeClient;
+use App\Models\LigneCommandeClient;
 use App\Models\LigneInventaire;
 use App\Models\LigneReception;
 use Illuminate\Database\Eloquent\Relations\Relation;
@@ -28,6 +31,9 @@ class AppServiceProvider extends ServiceProvider
         Relation::morphMap([
             'lignes_reception' => LigneReception::class,
             'lignes_inventaire' => LigneInventaire::class,
+            'lignes_commande_client' => LigneCommandeClient::class,
+            'commandes_client' => CommandeClient::class,
+            'annulations' => Annulation::class,
         ]);
     }
 }

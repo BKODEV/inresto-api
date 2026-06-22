@@ -27,15 +27,18 @@ class CarteProduit extends Model
         'produit_id',
         'prix_vente',
         'statut',
+        'ordre',
     ];
 
     protected $attributes = [
         'statut' => Statut::Actif->value,
+        'ordre' => 0,
     ];
 
     protected $casts = [
         'prix_vente' => 'decimal:2',
         'statut' => Statut::class,
+        'ordre' => 'integer',
     ];
 
     public function carte(): BelongsTo

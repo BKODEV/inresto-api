@@ -98,7 +98,6 @@ class AuthController extends Controller
                 'nom' => $site->nom,
                 'code' => $site->code,
                 'statut' => $site->statut->value,
-                'est_principal' => (bool) $site->pivot->est_principal,
             ])->values(),
         ];
     }

@@ -60,11 +60,13 @@ class SessionCaisse extends Model
     }
 
     /**
-     * Point d'extension Lot C : paiements encaissés sur cette session.
-     * Tant que paiements n'existe pas, aucun paiement n'est rattaché.
+     * Total payé sur la session = Σ des paiements des commandes rattachées à
+     * cette session de caisse. Alimente montant_theorique à la fermeture.
      */
     public function montantPaye(): float
     {
-        return 0.0;
+        return round((float) Paiement::query()
+            ->whereHas('commande', fn ($query) => $query->where('session_caisse_id', $this->id))
+            ->sum('montant'), 2);
     }
 }

@@ -35,6 +35,7 @@ class StoreCarteProduitRequest extends FormRequest
             ],
             'prix_vente' => ['required', 'numeric', 'gt:0'],
             'statut' => ['sometimes', Rule::enum(Statut::class)],
+            'ordre' => ['sometimes', 'integer', 'min:0'],
         ];
     }
 

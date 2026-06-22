@@ -10,7 +10,9 @@ use App\Http\Requests\CategorieProduit\StoreCategorieProduitRequest;
 use App\Http\Requests\CategorieProduit\UpdateCategorieProduitRequest;
 use App\Http\Resources\CategorieProduitResource;
 use App\Models\CategorieProduit;
+use App\Services\OrdreService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 
 class CategorieProduitController extends Controller
 {
@@ -19,14 +21,25 @@ class CategorieProduitController extends Controller
         $this->authorize('viewAny', CategorieProduit::class);
 
         return ApiResponse::success(
-            CategorieProduitResource::collection(CategorieProduit::all()),
+            CategorieProduitResource::collection(
+                CategorieProduit::orderBy('ordre')->orderBy('id')->get()
+            ),
             'Catégories produit récupérées.'
         );
     }
 
-    public function store(StoreCategorieProduitRequest $request): JsonResponse
+    public function store(StoreCategorieProduitRequest $request, OrdreService $ordreService): JsonResponse
     {
-        $categorie = CategorieProduit::create($request->validated());
+        $data = $request->validated();
+
+        $categorie = DB::transaction(function () use ($data, $ordreService) {
+            $data['ordre'] = $ordreService->placer(
+                fn () => CategorieProduit::query(),
+                $data['ordre'] ?? null,
+            );
+
+            return CategorieProduit::create($data);
+        });
 
         return ApiResponse::created(
             new CategorieProduitResource($categorie),
@@ -44,9 +57,20 @@ class CategorieProduitController extends Controller
         );
     }
 
-    public function update(UpdateCategorieProduitRequest $request, CategorieProduit $categorieProduit): JsonResponse
+    public function update(UpdateCategorieProduitRequest $request, CategorieProduit $categorieProduit, OrdreService $ordreService): JsonResponse
     {
-        $categorieProduit->update($request->validated());
+        $data = $request->validated();
+
+        DB::transaction(function () use ($categorieProduit, $data, $ordreService) {
+            if (array_key_exists('ordre', $data) && (int) $data['ordre'] !== $categorieProduit->ordre) {
+                $data['ordre'] = $ordreService->placer(
+                    fn () => CategorieProduit::query()->whereKeyNot($categorieProduit->id),
+                    $data['ordre'],
+                );
+            }
+
+            $categorieProduit->update($data);
+        });
 
         return ApiResponse::updated(
             new CategorieProduitResource($categorieProduit),

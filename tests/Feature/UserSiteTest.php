@@ -9,29 +9,25 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
-it('rattache un utilisateur à plusieurs sites avec un site principal', function () {
+it('rattache un utilisateur à plusieurs sites', function () {
     $user = User::factory()->create();
-    $sitePrincipal = Site::factory()->create();
-    $siteSecondaire = Site::factory()->create();
+    $siteA = Site::factory()->create();
+    $siteB = Site::factory()->create();
 
-    $user->sites()->attach($sitePrincipal->id, ['est_principal' => true]);
-    $user->sites()->attach($siteSecondaire->id, ['est_principal' => false]);
+    $user->sites()->attach($siteA->id);
+    $user->sites()->attach($siteB->id);
 
     expect($user->sites)->toHaveCount(2);
-
-    $principal = $user->sites()->wherePivot('est_principal', true)->sole();
-    expect($principal->is($sitePrincipal))->toBeTrue();
 });
 
-it('expose la relation inverse site -> users avec le pivot', function () {
+it('expose la relation inverse site -> users', function () {
     $user = User::factory()->create();
     $site = Site::factory()->create();
 
-    $user->sites()->attach($site->id, ['est_principal' => true]);
+    $user->sites()->attach($site->id);
 
     $rattache = $site->users()->sole();
-    expect($rattache->is($user))->toBeTrue()
-        ->and((bool) $rattache->pivot->est_principal)->toBeTrue();
+    expect($rattache->is($user))->toBeTrue();
 });
 
 it('interdit le rattachement en doublon d\'un utilisateur au même site', function () {

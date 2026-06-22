@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\StatutFicheTechnique;
 use App\Helpers\ApiResponse;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Produit\StoreProduitRequest;
@@ -60,12 +61,27 @@ class ProduitController extends Controller
         );
     }
 
+    /**
+     * Affiche un produit avec sa catégorie ET sa fiche technique active (lignes
+     * incluses) : le détail produit est le point d'entrée unique de la recette.
+     */
     public function show(Produit $produit): JsonResponse
     {
         $this->authorize('view', $produit);
 
+        $produit->load([
+            'categorie',
+            'fichesTechniques' => fn ($query) => $query
+                ->where('statut', StatutFicheTechnique::Active->value)
+                ->with([
+                    'lignesMatiere.matierePremiere',
+                    'lignesMatiere.unite',
+                    'lignesSousRecette.sousRecette',
+                ]),
+        ]);
+
         return ApiResponse::success(
-            new ProduitResource($produit->load('categorie')),
+            new ProduitResource($produit),
             'Produit récupéré.'
         );
     }

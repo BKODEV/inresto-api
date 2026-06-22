@@ -62,6 +62,16 @@ class CaisseController extends Controller
     {
         $this->authorize('delete', $caisse);
 
+        // Une caisse porteuse de sessions (donc de ventes/paiements) ne peut être
+        // supprimée : on protège l'intégrité de l'historique financier.
+        if ($caisse->sessions()->exists()) {
+            return ApiResponse::custom(
+                409,
+                'error',
+                'Cette caisse a un historique de sessions et ne peut être supprimée.'
+            );
+        }
+
         $caisse->delete();
 
         return ApiResponse::deleted('Caisse supprimée avec succès.');

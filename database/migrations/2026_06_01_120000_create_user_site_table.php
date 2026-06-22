@@ -22,8 +22,6 @@ return new class extends Migration
             $table->foreignId('site_id')
                 ->constrained('sites')
                 ->cascadeOnDelete();
-            $table->boolean('est_principal')->default(false); // site de rattachement principal
-
             $table->unique(['user_id', 'site_id']);
         });
     }

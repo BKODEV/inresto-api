@@ -1,11 +1,15 @@
 <?php
 
+use App\Exceptions\AnnulationException;
 use App\Exceptions\CarteProduitException;
+use App\Exceptions\CommandeClientException;
 use App\Exceptions\CommandeFournisseurException;
 use App\Exceptions\FicheTechniqueException;
 use App\Exceptions\InventaireException;
+use App\Exceptions\PaiementException;
 use App\Exceptions\ProduitException;
 use App\Exceptions\ReceptionException;
+use App\Exceptions\RemiseException;
 use App\Exceptions\SessionCaisseException;
 use App\Exceptions\SousRecetteException;
 use App\Exceptions\TableSalleException;
@@ -63,6 +67,22 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         $exceptions->render(function (SessionCaisseException $e) {
+            return ApiResponse::custom($e->status, 'error', $e->getMessage());
+        });
+
+        $exceptions->render(function (CommandeClientException $e) {
+            return ApiResponse::custom($e->status, 'error', $e->getMessage());
+        });
+
+        $exceptions->render(function (PaiementException $e) {
+            return ApiResponse::custom($e->status, 'error', $e->getMessage());
+        });
+
+        $exceptions->render(function (RemiseException $e) {
+            return ApiResponse::custom($e->status, 'error', $e->getMessage());
+        });
+
+        $exceptions->render(function (AnnulationException $e) {
             return ApiResponse::custom($e->status, 'error', $e->getMessage());
         });
 

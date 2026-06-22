@@ -20,8 +20,9 @@ class UpdateCategorieProduitRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'libelle'     => ['sometimes', 'string', 'max:255'],
+            'libelle' => ['sometimes', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
+            'ordre' => ['sometimes', 'integer', 'min:0'],
         ];
     }
 }

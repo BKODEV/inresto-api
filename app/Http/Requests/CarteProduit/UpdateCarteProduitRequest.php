@@ -24,6 +24,7 @@ class UpdateCarteProduitRequest extends FormRequest
         return [
             'prix_vente' => ['sometimes', 'numeric', 'gt:0'],
             'statut' => ['sometimes', Rule::enum(Statut::class)],
+            'ordre' => ['sometimes', 'integer', 'min:0'],
         ];
     }
 }

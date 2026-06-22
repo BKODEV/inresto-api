@@ -10,6 +10,7 @@ use Database\Factories\PointDeVenteFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class PointDeVente extends Model
 {
@@ -38,6 +39,11 @@ class PointDeVente extends Model
     public function site(): BelongsTo
     {
         return $this->belongsTo(Site::class);
+    }
+
+    public function caisses(): HasMany
+    {
+        return $this->hasMany(Caisse::class);
     }
 
     public function isActif(): bool

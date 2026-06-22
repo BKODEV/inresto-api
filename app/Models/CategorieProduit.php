@@ -18,5 +18,14 @@ class CategorieProduit extends Model
     protected $fillable = [
         'libelle',
         'description',
+        'ordre',
+    ];
+
+    protected $attributes = [
+        'ordre' => 0,
+    ];
+
+    protected $casts = [
+        'ordre' => 'integer',
     ];
 }

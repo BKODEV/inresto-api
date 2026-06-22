@@ -39,8 +39,6 @@ class SuperAdminSeeder extends Seeder
             ['nom' => 'Site principal', 'statut' => 'actif']
         );
 
-        $user->sites()->syncWithoutDetaching([
-            $site->id => ['est_principal' => true],
-        ]);
+        $user->sites()->syncWithoutDetaching([$site->id]);
     }
 }

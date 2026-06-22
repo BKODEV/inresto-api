@@ -57,14 +57,9 @@ class Site extends Model
         return $this->hasMany(MouvementStock::class);
     }
 
-    /**
-     * Utilisateurs rattachés au site. `est_principal` marque, côté pivot, le
-     * site de rattachement principal de l'utilisateur.
-     */
     public function users(): BelongsToMany
     {
-        return $this->belongsToMany(User::class, 'user_site')
-            ->withPivot('est_principal');
+        return $this->belongsToMany(User::class, 'user_site');
     }
 
     public function isActif(): bool

@@ -1,9 +1,11 @@
 <?php
 
+use App\Http\Controllers\Api\AnnulationController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BudgetController;
 use App\Http\Controllers\Api\CarteProduitController;
 use App\Http\Controllers\Api\CatalogueFournisseurController;
+use App\Http\Controllers\Api\CommandeClientController;
 use App\Http\Controllers\Api\CommandeFournisseurController;
 use App\Http\Controllers\Api\DepenseController;
 use App\Http\Controllers\Api\FicheTechniqueController;
@@ -11,15 +13,19 @@ use App\Http\Controllers\Api\FournisseurController;
 use App\Http\Controllers\Api\InventaireController;
 use App\Http\Controllers\Api\LigneCommandeFournisseurController;
 use App\Http\Controllers\Api\MatierePremiereController;
+use App\Http\Controllers\Api\PaiementController;
+use App\Http\Controllers\Api\ParametreEtablissementController;
 use App\Http\Controllers\Api\Parametres\CaisseController;
 use App\Http\Controllers\Api\Parametres\CarteController;
 use App\Http\Controllers\Api\Parametres\CategorieMatierePremireController;
 use App\Http\Controllers\Api\Parametres\CategorieProduitController;
 use App\Http\Controllers\Api\Parametres\ModeDePaiementController;
 use App\Http\Controllers\Api\Parametres\UniteDeMesureController;
+use App\Http\Controllers\Api\PdfController;
 use App\Http\Controllers\Api\PointDeVenteController;
 use App\Http\Controllers\Api\ProduitController;
 use App\Http\Controllers\Api\ReceptionController;
+use App\Http\Controllers\Api\RemiseController;
 use App\Http\Controllers\Api\SessionCaisseController;
 use App\Http\Controllers\Api\SiteController;
 use App\Http\Controllers\Api\SousRecetteController;
@@ -39,6 +45,17 @@ Route::middleware('auth:sanctum')->group(function () {
     // Périmètre métier de l'utilisateur connecté (sélecteur de site).
     // Déclaré avant la ressource pour ne pas être capté par sites/{site}.
     Route::get('sites/perimetre', [SiteController::class, 'perimetre'])->name('sites.perimetre');
+
+    // Paramètres d'établissement par site (une fiche/site) + logo.
+    Route::get('sites/{site}/parametres', [ParametreEtablissementController::class, 'show'])
+        ->name('sites.parametres.show');
+    Route::put('sites/{site}/parametres', [ParametreEtablissementController::class, 'store'])
+        ->name('sites.parametres.store');
+    Route::post('sites/{site}/parametres/logo', [ParametreEtablissementController::class, 'uploadLogo'])
+        ->name('sites.parametres.logo.upload');
+    Route::delete('sites/{site}/parametres/logo', [ParametreEtablissementController::class, 'deleteLogo'])
+        ->name('sites.parametres.logo.delete');
+
     Route::apiResource('sites', SiteController::class);
 
     Route::apiResource('points-de-vente', PointDeVenteController::class)
@@ -66,6 +83,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::apiResource('commandes-fournisseur', CommandeFournisseurController::class)
         ->parameters(['commandes-fournisseur' => 'commande_fournisseur']);
+    Route::get('commandes-fournisseur/{commande_fournisseur}/pdf', [PdfController::class, 'bonCommandeFournisseur'])
+        ->name('commandes-fournisseur.pdf');
     Route::post('commandes-fournisseur/{commande_fournisseur}/envoyer', [CommandeFournisseurController::class, 'envoyer'])
         ->name('commandes-fournisseur.envoyer');
     Route::post('commandes-fournisseur/{commande_fournisseur}/annuler', [CommandeFournisseurController::class, 'annuler'])
@@ -88,6 +107,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('fiches-techniques/{produit_id}/historique', [FicheTechniqueController::class, 'historique'])
         ->whereNumber('produit_id')
         ->name('fiches-techniques.historique');
+    Route::get('fiches-techniques/{fiche_technique}/pdf', [PdfController::class, 'ficheTechnique'])
+        ->whereNumber('fiche_technique')
+        ->name('fiches-techniques.pdf');
     Route::apiResource('fiches-techniques', FicheTechniqueController::class)
         ->parameters(['fiches-techniques' => 'fiche_technique']);
 
@@ -111,6 +133,35 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('sessions-caisse/{session}/fermer', [SessionCaisseController::class, 'fermer'])
         ->name('sessions-caisse.fermer');
 
+    // Module Salle — Commandes client + KDS + déstockage à la vente.
+    Route::apiResource('commandes-client', CommandeClientController::class)
+        ->only(['index', 'store', 'show'])
+        ->parameters(['commandes-client' => 'commande']);
+    Route::get('commandes-client/{commande}/pdf', [PdfController::class, 'factureClient'])
+        ->name('commandes-client.pdf');
+    Route::get('commandes-client/{commande}/recu', [PdfController::class, 'recuClient'])
+        ->name('commandes-client.recu');
+    Route::post('commandes-client/{commande}/lignes', [CommandeClientController::class, 'ajouterLigne'])
+        ->name('commandes-client.lignes.store');
+    Route::post('commandes-client/{commande}/envoyer-en-cuisine', [CommandeClientController::class, 'envoyerEnCuisine'])
+        ->name('commandes-client.envoyer-en-cuisine');
+    Route::post('commandes-client/{commande}/servir', [CommandeClientController::class, 'servir'])
+        ->name('commandes-client.servir');
+    Route::post('commandes-client/{commande}/encaisser', [CommandeClientController::class, 'encaisser'])
+        ->name('commandes-client.encaisser');
+    Route::get('kds/{point_de_vente}', [CommandeClientController::class, 'kds'])
+        ->name('kds.index');
+
+    // Module Salle — Lot C-2 : paiements, remises, annulations.
+    Route::post('commandes-client/{commande}/paiements', [PaiementController::class, 'store'])
+        ->name('commandes-client.paiements.store');
+    Route::post('commandes-client/{commande}/remises', [RemiseController::class, 'store'])
+        ->name('commandes-client.remises.store');
+    Route::post('commandes-client/{commande}/annuler', [AnnulationController::class, 'annulerCommande'])
+        ->name('commandes-client.annuler');
+    Route::delete('commandes-client/{commande}/lignes/{ligne}', [AnnulationController::class, 'annulerLigne'])
+        ->name('commandes-client.lignes.annuler');
+
     Route::apiResource('inventaires', InventaireController::class)
         ->only(['index', 'store', 'show', 'destroy']);
     Route::post('inventaires/{inventaire}/lignes', [InventaireController::class, 'lignes'])
@@ -122,6 +173,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('inventaires/{inventaire}/rapport', [InventaireController::class, 'rapport'])
         ->name('inventaires.rapport');
 
+    // Paramètres généraux (CRUD + listes pour selects).
     Route::prefix('parametres')->name('parametres.')->group(function () {
         Route::apiResource('categories-produit', CategorieProduitController::class)
             ->parameters(['categories-produit' => 'categorie_produit']);

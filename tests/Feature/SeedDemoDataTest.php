@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Models\CarteProduit;
 use App\Models\Depense;
 use App\Models\FicheTechnique;
 use App\Models\Inventaire;
@@ -20,6 +21,12 @@ it('génère un jeu de démonstration complet de bout en bout', function () {
     expect(SousRecette::count())->toBeGreaterThan(0)
         ->and(Produit::count())->toBeGreaterThan(0)
         ->and(FicheTechnique::where('statut', 'active')->count())->toBeGreaterThan(0);
+
+    // Une fiche technique active par produit généré.
+    expect(FicheTechnique::where('statut', 'active')->count())->toBe(Produit::count());
+
+    // Cartes composées (produits + prix) pour illustrer le regroupement par catégorie.
+    expect(CarteProduit::count())->toBeGreaterThan(0);
 
     // Flux achats confirmés : réceptions + dépenses + entrées de stock.
     expect(Reception::count())->toBeGreaterThan(0)

@@ -19,6 +19,9 @@ return new class extends Migration
             $table->foreignId('produit_id')->constrained('produits')->restrictOnDelete();
             $table->decimal('prix_vente', 10, 2);
             $table->enum('statut', ['actif', 'inactif'])->default('actif');
+            // Ordre d'affichage DANS sa section (la section = catégorie du produit).
+            // Les sections elles-mêmes sont ordonnées par la catégorie du produit.
+            $table->unsignedInteger('ordre')->default(0);
             $table->timestamps();
 
             $table->unique(['carte_id', 'produit_id']);

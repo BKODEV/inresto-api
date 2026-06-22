@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Requests\CommandeFournisseur;
 
 use App\Models\CommandeFournisseur;
+use App\Rules\MatiereAuCatalogue;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -21,6 +22,10 @@ class StoreCommandeFournisseurRequest extends FormRequest
      */
     public function rules(): array
     {
+        $fournisseurId = $this->input('fournisseur_id') !== null
+            ? (int) $this->input('fournisseur_id')
+            : null;
+
         return [
             'fournisseur_id' => ['required', 'integer', 'exists:fournisseurs,id'],
             'date_commande' => ['nullable', 'date'],
@@ -30,6 +35,7 @@ class StoreCommandeFournisseurRequest extends FormRequest
                 'required_with:lignes',
                 'integer',
                 Rule::exists('matieres_premieres', 'id')->where('statut', 'actif'),
+                new MatiereAuCatalogue($fournisseurId),
             ],
             'lignes.*.unite_id' => [
                 'required_with:lignes',

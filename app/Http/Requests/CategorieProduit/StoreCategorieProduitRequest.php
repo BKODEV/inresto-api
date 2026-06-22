@@ -21,8 +21,9 @@ class StoreCategorieProduitRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'libelle'     => ['required', 'string', 'max:255'],
+            'libelle' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
+            'ordre' => ['sometimes', 'integer', 'min:0'],
         ];
     }
 }

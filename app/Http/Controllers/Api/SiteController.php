@@ -24,14 +24,16 @@ class SiteController extends Controller
         $this->authorize('viewAny', Site::class);
 
         return ApiResponse::success(
-            ['sites' => SiteResource::collection(Site::orderBy('nom')->get())],
+            ['sites' => SiteResource::collection(
+                Site::withCount('pointsDeVente')->orderBy('nom')->get()
+            )],
             'Sites récupérés.'
         );
     }
 
     /**
-     * Périmètre métier de l'utilisateur connecté : ses sites actifs (principal
-     * en tête). Alimente le sélecteur de site des écrans rattachés à un site.
+     * Périmètre métier de l'utilisateur connecté : ses sites actifs.
+     * Alimente le sélecteur de site des écrans rattachés à un site.
      * Pas de permission dédiée (périmètre = ses propres sites).
      */
     public function perimetre(Request $request): JsonResponse
@@ -39,7 +41,6 @@ class SiteController extends Controller
         $sites = $request->user()
             ->sites()
             ->where('statut', Statut::Actif->value)
-            ->orderByDesc('user_site.est_principal')
             ->orderBy('nom')
             ->get();
 
@@ -59,6 +60,13 @@ class SiteController extends Controller
     public function show(Site $site): JsonResponse
     {
         $this->authorize('view', $site);
+
+        // Détail de site : on embarque ses points de vente (avec leur nombre de
+        // caisses) afin que l'écran « Détail de site » se charge en une requête.
+        $site->load(['pointsDeVente' => function ($query) {
+            $query->withCount('caisses')->orderBy('nom');
+        }]);
+        $site->loadCount('pointsDeVente');
 
         return ApiResponse::success(new SiteResource($site), 'Site récupéré.');
     }

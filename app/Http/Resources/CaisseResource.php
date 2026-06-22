@@ -15,12 +15,15 @@ class CaisseResource extends JsonResource
     public function toArray(Request $request): array
     {
         return [
-            'id'             => $this->id,
-            'libelle'        => $this->libelle,
-            'statut'         => $this->statut->value,
+            'id' => $this->id,
+            'point_de_vente_id' => $this->point_de_vente_id,
+            'libelle' => $this->libelle,
+            'statut' => $this->statut->value,
+            // Nombre de sessions : >0 ⇒ la caisse a un historique et ne peut être supprimée.
+            'sessions_count' => $this->whenCounted('sessions'),
             'point_de_vente' => new PointDeVenteResource($this->whenLoaded('pointDeVente')),
-            'created_at'     => $this->created_at?->toIso8601String(),
-            'updated_at'     => $this->updated_at?->toIso8601String(),
+            'created_at' => $this->created_at?->toIso8601String(),
+            'updated_at' => $this->updated_at?->toIso8601String(),
         ];
     }
 }

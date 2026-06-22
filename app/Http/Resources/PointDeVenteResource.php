@@ -21,6 +21,8 @@ class PointDeVenteResource extends JsonResource
             'type' => $this->type->value,
             'description' => $this->description,
             'statut' => $this->statut->value,
+            'caisses_count' => $this->whenCounted('caisses'),
+            'caisses' => CaisseResource::collection($this->whenLoaded('caisses')),
             'site' => new SiteResource($this->whenLoaded('site')),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),

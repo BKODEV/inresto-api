@@ -1,0 +1,24 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        if (Schema::hasColumn('user_site', 'est_principal')) {
+            Schema::table('user_site', function (Blueprint $table) {
+                $table->dropColumn('est_principal');
+            });
+        }
+    }
+
+    public function down(): void
+    {
+        Schema::table('user_site', function (Blueprint $table) {
+            $table->boolean('est_principal')->default(false);
+        });
+    }
+};

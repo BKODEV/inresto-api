@@ -9,6 +9,7 @@ use Database\Factories\CaisseFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Caisse extends Model
 {
@@ -28,5 +29,10 @@ class Caisse extends Model
     public function pointDeVente(): BelongsTo
     {
         return $this->belongsTo(PointDeVente::class);
+    }
+
+    public function sessions(): HasMany
+    {
+        return $this->hasMany(SessionCaisse::class);
     }
 }

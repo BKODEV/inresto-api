@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Console\Commands;
 
+use App\Enums\CarteStatut;
 use App\Enums\MouvementType;
 use App\Models\Budget;
 use App\Models\Caisse;
 use App\Models\Carte;
+use App\Models\CarteProduit;
 use App\Models\CatalogueFournisseur;
 use App\Models\CategorieMatierePremiere;
 use App\Models\CategorieProduit;
@@ -73,7 +75,8 @@ class SeedDemoData extends Command
         // Modules Lot 2 & Lot 3 : tout passe par les services métier.
         $userId = User::query()->value('id');
         $sousRecettes = $this->creerSousRecettes($matieres, $unites, $userId);
-        $this->creerProduitsEtFiches($matieres, $sousRecettes, $userId);
+        $produits = $this->creerProduitsEtFiches($matieres, $sousRecettes, $userId);
+        $this->creerCompositionCartes($produits);
         $this->creerCommandesEtReceptions($sites, $fournisseurs, $userId);
         $this->creerChargesManuelles($sites);
         $this->creerInventaires($sites, $matieres, $userId);
@@ -108,23 +111,21 @@ class SeedDemoData extends Command
         $sites->each(function (Site $site): void {
             $user = User::factory()->create();
 
-            $user->sites()->attach($site->id, ['est_principal' => true]);
+            $user->sites()->attach($site->id);
         });
     }
 
     private function creerParametres(): void
     {
-        CategorieProduit::factory()->count(4)->create();
+        // Catégories produit = sections d'une carte, ordonnées (Entrées < Plats…).
+        collect(['Entrées', 'Plats', 'Desserts', 'Boissons'])
+            ->each(fn (string $libelle, int $i) => CategorieProduit::factory()->create([
+                'libelle' => $libelle,
+                'ordre' => $i + 1,
+            ]));
 
-        CategorieMatierePremiere::factory()
-            ->count(4)
-            ->sequence(
-                ['libelle' => 'Fruits & Légumes'],
-                ['libelle' => 'Viandes & Volailles'],
-                ['libelle' => 'Produits de la mer'],
-                ['libelle' => 'Épicerie'],
-            )
-            ->create();
+        collect(['Fruits & Légumes', 'Viandes & Volailles', 'Produits de la mer', 'Épicerie', 'Crèmerie'])
+            ->each(fn (string $libelle) => CategorieMatierePremiere::factory()->create(['libelle' => $libelle]));
 
         collect(['Espèces', 'Carte bancaire', 'Mobile Money', 'Virement'])
             ->each(fn (string $libelle) => ModeDePaiement::factory()->create(['libelle' => $libelle]));
@@ -174,11 +175,34 @@ class SeedDemoData extends Command
      */
     private function creerMatieres(): Collection
     {
-        return MatierePremiere::factory()
-            ->count(12)
-            ->recycle(CategorieMatierePremiere::all())
-            ->recycle(UniteDeMesure::all())
-            ->create();
+        $categories = CategorieMatierePremiere::all()->keyBy('libelle');
+        $unites = UniteDeMesure::all()->keyBy('symbole');
+
+        // libellé => [catégorie, unité de stockage]
+        return collect([
+            'Tomate' => ['Fruits & Légumes', 'kg'],
+            'Oignon' => ['Fruits & Légumes', 'kg'],
+            'Pomme de terre' => ['Fruits & Légumes', 'kg'],
+            'Banane plantain' => ['Fruits & Légumes', 'kg'],
+            'Salade verte' => ['Fruits & Légumes', 'pce'],
+            'Banane dessert' => ['Fruits & Légumes', 'kg'],
+            'Poulet' => ['Viandes & Volailles', 'kg'],
+            'Bœuf' => ['Viandes & Volailles', 'kg'],
+            'Tilapia' => ['Produits de la mer', 'kg'],
+            'Crevettes' => ['Produits de la mer', 'kg'],
+            'Riz' => ['Épicerie', 'kg'],
+            'Huile végétale' => ['Épicerie', 'L'],
+            'Sel' => ['Épicerie', 'kg'],
+            'Farine de blé' => ['Épicerie', 'sac'],
+            'Sucre' => ['Épicerie', 'kg'],
+            'Lait' => ['Crèmerie', 'L'],
+            'Fromage' => ['Crèmerie', 'kg'],
+            'Œufs' => ['Crèmerie', 'pce'],
+        ])->map(fn (array $meta, string $libelle): MatierePremiere => MatierePremiere::factory()->create([
+            'libelle' => $libelle,
+            'categorie_id' => $categories[$meta[0]]->id,
+            'unite_de_mesure_id' => $unites[$meta[1]]->id,
+        ]))->values();
     }
 
     /**
@@ -250,45 +274,110 @@ class SeedDemoData extends Command
     private function creerSousRecettes(Collection $matieres, Collection $unites, string $userId): Collection
     {
         $service = app(SousRecetteService::class);
+        $parMatiere = $matieres->keyBy('libelle');
+        $parUnite = $unites->keyBy('symbole');
 
-        return collect(['Fond de sauce', 'Pâte à pizza', 'Bouillon maison'])
-            ->map(fn (string $libelle): SousRecette => $service->creer([
-                'libelle' => $libelle,
-                'quantite_produite' => fake()->randomFloat(3, 1, 10),
-                'unite_id' => $unites->random()->id,
-                'lignes' => $matieres->random(3)->map(fn (MatierePremiere $matiere): array => [
-                    'matiere_premiere_id' => $matiere->id,
-                    'unite_id' => $matiere->unite_de_mesure_id,
-                    'quantite' => fake()->randomFloat(3, 1, 5),
-                ])->all(),
-            ], $userId));
+        // libellé => [unité produite, matières]
+        $definitions = [
+            'Fond de sauce' => ['L', ['Tomate', 'Oignon', 'Huile végétale']],
+            'Pâte à beignets' => ['kg', ['Farine de blé', 'Sucre', 'Œufs']],
+            'Bouillon maison' => ['L', ['Poulet', 'Oignon', 'Sel']],
+        ];
+
+        return collect($definitions)->map(fn (array $def, string $libelle): SousRecette => $service->creer([
+            'libelle' => $libelle,
+            'quantite_produite' => fake()->randomFloat(3, 1, 5),
+            'unite_id' => $parUnite[$def[0]]->id,
+            'lignes' => collect($def[1])->map(fn (string $nom): array => [
+                'matiere_premiere_id' => $parMatiere[$nom]->id,
+                'unite_id' => $parMatiere[$nom]->unite_de_mesure_id,
+                'quantite' => fake()->randomFloat(3, 0.1, 2),
+            ])->all(),
+        ], $userId))->values();
     }
 
     /**
-     * Produits + leur fiche technique active (matières + sous-recettes), via le
-     * service (versioning + coût de référence).
+     * Produits réalistes, classés par catégorie, CHACUN avec sa fiche technique
+     * active (matières cohérentes + sous-recette éventuelle), via le service
+     * (versioning + coût de référence).
      *
      * @param  Collection<int, MatierePremiere>  $matieres
      * @param  Collection<int, SousRecette>  $sousRecettes
+     * @return Collection<int, Produit>
      */
-    private function creerProduitsEtFiches(Collection $matieres, Collection $sousRecettes, string $userId): void
+    private function creerProduitsEtFiches(Collection $matieres, Collection $sousRecettes, string $userId): Collection
     {
         $service = app(FicheTechniqueService::class);
+        $categories = CategorieProduit::all()->keyBy('libelle');
+        $parMatiere = $matieres->keyBy('libelle');
+        $parSousRecette = $sousRecettes->keyBy('libelle');
 
-        Produit::factory()->count(4)->recycle(CategorieProduit::all())->create()->each(
-            fn (Produit $produit) => $service->creer([
+        // libellé => [catégorie, matières, sous-recette éventuelle]
+        $definitions = [
+            'Salade composée' => ['Entrées', ['Salade verte', 'Tomate', 'Oignon'], null],
+            'Crevettes sautées' => ['Entrées', ['Crevettes', 'Huile végétale', 'Sel'], null],
+            'Poulet braisé' => ['Plats', ['Poulet', 'Oignon', 'Huile végétale'], 'Fond de sauce'],
+            'Bœuf sauce tomate' => ['Plats', ['Bœuf', 'Tomate', 'Oignon'], 'Fond de sauce'],
+            'Tilapia braisé' => ['Plats', ['Tilapia', 'Huile végétale', 'Sel'], null],
+            'Riz sauté aux légumes' => ['Plats', ['Riz', 'Huile végétale', 'Oignon'], null],
+            'Salade de fruits' => ['Desserts', ['Banane dessert', 'Sucre'], null],
+            'Beignets sucrés' => ['Desserts', ['Farine de blé', 'Huile végétale'], 'Pâte à beignets'],
+        ];
+
+        return collect($definitions)->map(function (array $def, string $libelle) use ($service, $categories, $parMatiere, $parSousRecette, $userId): Produit {
+            $produit = Produit::factory()->create([
+                'libelle' => $libelle,
+                'categorie_id' => $categories[$def[0]]->id,
+            ]);
+
+            $service->creer([
                 'produit_id' => $produit->id,
-                'lignes_matieres' => $matieres->random(3)->map(fn (MatierePremiere $matiere): array => [
-                    'matiere_premiere_id' => $matiere->id,
-                    'unite_id' => $matiere->unite_de_mesure_id,
-                    'quantite' => fake()->randomFloat(3, 1, 4),
+                'lignes_matieres' => collect($def[1])->map(fn (string $nom): array => [
+                    'matiere_premiere_id' => $parMatiere[$nom]->id,
+                    'unite_id' => $parMatiere[$nom]->unite_de_mesure_id,
+                    'quantite' => fake()->randomFloat(3, 0.05, 1.5),
                 ])->all(),
-                'lignes_sous_recettes' => $sousRecettes->random(1)->map(fn (SousRecette $sousRecette): array => [
-                    'sous_recette_id' => $sousRecette->id,
-                    'quantite' => fake()->randomFloat(3, 1, 3),
-                ])->all(),
-            ], $userId)
-        );
+                'lignes_sous_recettes' => $def[2] === null ? [] : [[
+                    'sous_recette_id' => $parSousRecette[$def[2]]->id,
+                    'quantite' => fake()->randomFloat(3, 0.1, 0.5),
+                ]],
+            ], $userId);
+
+            return $produit;
+        })->values();
+    }
+
+    /**
+     * Compose chaque carte avec tous les produits (prix de vente logique par
+     * catégorie + ordre dans la section), puis active la carte. Donne une carte
+     * réaliste, regroupée par catégorie côté front.
+     *
+     * @param  Collection<int, Produit>  $produits
+     */
+    private function creerCompositionCartes(Collection $produits): void
+    {
+        $prixParCategorie = ['Entrées' => 2500, 'Plats' => 6000, 'Desserts' => 2000, 'Boissons' => 1500];
+        $categories = CategorieProduit::all()->keyBy('id');
+
+        Carte::all()->each(function (Carte $carte) use ($produits, $prixParCategorie, $categories): void {
+            // Sous-ensemble : on laisse volontairement des produits hors carte pour
+            // que le bouton « Ajouter un produit » reste actif en démo.
+            $selection = $produits->shuffle()->take(fake()->numberBetween(4, 6))->values();
+
+            $selection->each(function (Produit $produit, int $index) use ($carte, $prixParCategorie, $categories): void {
+                $libelleCategorie = $categories[$produit->categorie_id]->libelle ?? '';
+                $base = $prixParCategorie[$libelleCategorie] ?? 3000;
+
+                CarteProduit::factory()->create([
+                    'carte_id' => $carte->id,
+                    'produit_id' => $produit->id,
+                    'prix_vente' => $base + fake()->numberBetween(0, 1500),
+                    'ordre' => $index,
+                ]);
+            });
+
+            $carte->update(['statut' => CarteStatut::Active->value]);
+        });
     }
 
     /**

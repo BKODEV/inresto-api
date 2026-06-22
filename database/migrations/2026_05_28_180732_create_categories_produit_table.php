@@ -15,6 +15,8 @@ return new class extends Migration
             $table->id();
             $table->string('libelle');
             $table->text('description')->nullable();
+            // Ordre d'affichage des sections d'une carte (Entrée < Plat < Dessert…).
+            $table->unsignedInteger('ordre')->default(0);
             $table->timestamps();
         });
     }
