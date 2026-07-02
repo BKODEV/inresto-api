@@ -72,6 +72,39 @@ it('expose les sites de l\'utilisateur dans /auth/me', function () {
         ->assertJsonPath('data.sites.0.id', $site->id);
 });
 
+it('donne au super-admin tous les sites actifs, sans rattachement user_site', function () {
+    seedRbac();
+    $alpha = Site::factory()->create(['nom' => 'Alpha']);
+    $zeta = Site::factory()->create(['nom' => 'Zeta']);
+    $inactif = Site::factory()->inactif()->create();
+
+    // Aucun site attaché : le super-admin n'est borné par aucun périmètre.
+    $superAdmin = actingAsSuperAdmin();
+    expect($superAdmin->sites)->toHaveCount(0);
+
+    $response = getJson('/api/sites/perimetre');
+
+    $response->assertOk()
+        ->assertJsonCount(2, 'data.sites')
+        ->assertJsonPath('data.sites.0.id', $alpha->id)
+        ->assertJsonPath('data.sites.1.id', $zeta->id);
+
+    expect(collect($response->json('data.sites'))->pluck('id'))
+        ->not->toContain($inactif->id);
+});
+
+it('expose tous les sites actifs au super-admin dans /auth/me', function () {
+    seedRbac();
+    Site::factory()->count(3)->create();
+    Site::factory()->inactif()->create();
+
+    actingAsSuperAdmin();
+
+    getJson('/api/auth/me')
+        ->assertOk()
+        ->assertJsonCount(3, 'data.sites');
+});
+
 it('refuse le périmètre sans authentification', function () {
     getJson('/api/sites/perimetre')->assertUnauthorized();
 });

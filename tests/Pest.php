@@ -1,6 +1,12 @@
 <?php
 
+use App\Models\Role;
+use App\Models\User;
+use Database\Seeders\PermissionSeeder;
+use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Sanctum\Sanctum;
+use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
 
 /*
@@ -47,4 +53,66 @@ expect()->extend('toBeOne', function () {
 function something()
 {
     // ..
+}
+
+/**
+ * Seede les permissions + rôles système (RBAC) dans la base de test.
+ */
+function seedRbac(): void
+{
+    test()->seed(PermissionSeeder::class);
+    test()->seed(RoleSeeder::class);
+}
+
+/**
+ * Crée un utilisateur portant un rôle système (les rôles doivent être seedés),
+ * éventuellement rattaché à des sites, et l'authentifie via Sanctum.
+ *
+ * @param  int[]  $siteIds
+ */
+function actingAsRole(string $role, array $siteIds = []): User
+{
+    $user = User::factory()->create();
+    $user->assignRole($role);
+
+    if ($siteIds !== []) {
+        $user->sites()->sync($siteIds);
+    }
+
+    Sanctum::actingAs($user->load(['roles', 'sites']));
+
+    return $user;
+}
+
+/**
+ * Crée et authentifie un super-admin (rôle système requis).
+ */
+function actingAsSuperAdmin(array $siteIds = []): User
+{
+    return actingAsRole(Role::SUPER_ADMIN, $siteIds);
+}
+
+/**
+ * Authentifie un utilisateur avec les permissions et le périmètre de sites
+ * donnés, pour les tests du module Reporting.
+ *
+ * @param  string[]  $permissions
+ * @param  int[]  $siteIds  Sites rattachés (pivot user_site).
+ */
+function actingAsReportingUser(array $permissions = [], array $siteIds = []): User
+{
+    $user = User::factory()->create();
+
+    foreach ($permissions as $name) {
+        Permission::findOrCreate($name, 'api');
+    }
+    $user->givePermissionTo($permissions);
+
+    if ($siteIds !== []) {
+        $user->sites()->sync($siteIds);
+    }
+
+    Sanctum::actingAs($user);
+
+    return $user;
 }

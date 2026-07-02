@@ -4,6 +4,17 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Application front
+    |--------------------------------------------------------------------------
+    |
+    | URL de base du front Angular, utilisée pour construire les liens envoyés
+    | par email (réinitialisation de mot de passe). Chaque déploiement la
+    | configure via l'env ; à défaut on retombe sur APP_URL.
+    */
+    'frontend_url' => env('FRONTEND_URL', env('APP_URL', 'http://localhost')),
+
+    /*
+    |--------------------------------------------------------------------------
     | Gestion du stock
     |--------------------------------------------------------------------------
     */

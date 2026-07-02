@@ -21,19 +21,31 @@ use App\Http\Controllers\Api\Parametres\CategorieMatierePremireController;
 use App\Http\Controllers\Api\Parametres\CategorieProduitController;
 use App\Http\Controllers\Api\Parametres\ModeDePaiementController;
 use App\Http\Controllers\Api\Parametres\UniteDeMesureController;
+use App\Http\Controllers\Api\PasswordResetController;
 use App\Http\Controllers\Api\PdfController;
+use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\PointDeVenteController;
 use App\Http\Controllers\Api\ProduitController;
 use App\Http\Controllers\Api\ReceptionController;
 use App\Http\Controllers\Api\RemiseController;
+use App\Http\Controllers\Api\Reporting\BudgetController as ReportingBudgetController;
+use App\Http\Controllers\Api\Reporting\DashboardController as ReportingDashboardController;
+use App\Http\Controllers\Api\Reporting\FoodCostController as ReportingFoodCostController;
+use App\Http\Controllers\Api\Reporting\StockController as ReportingStockController;
+use App\Http\Controllers\Api\Reporting\VentesController as ReportingVentesController;
+use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SessionCaisseController;
 use App\Http\Controllers\Api\SiteController;
 use App\Http\Controllers\Api\SousRecetteController;
 use App\Http\Controllers\Api\TableSalleController;
+use App\Http\Controllers\Api\UserController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function () {
     Route::post('login', [AuthController::class, 'login'])->name('auth.login');
+
+    // Route publique : consommation du token de réinitialisation reçu par email.
+    Route::post('reset-password', [PasswordResetController::class, 'reset'])->name('auth.reset-password');
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('me', [AuthController::class, 'me'])->name('auth.me');
@@ -42,6 +54,16 @@ Route::prefix('auth')->group(function () {
 });
 
 Route::middleware('auth:sanctum')->group(function () {
+    // Module Utilisateurs & Rôles (administration).
+    Route::post('users/{user}/activer', [UserController::class, 'activer'])->name('users.activer');
+    Route::post('users/{user}/desactiver', [UserController::class, 'desactiver'])->name('users.desactiver');
+    Route::post('users/{user}/reset-password', [UserController::class, 'resetPassword'])->name('users.reset-password');
+    Route::post('users/{user}/send-reset-link', [UserController::class, 'sendResetLink'])->name('users.send-reset-link');
+    Route::apiResource('users', UserController::class);
+
+    Route::apiResource('roles', RoleController::class);
+    Route::get('permissions', [PermissionController::class, 'index'])->name('permissions.index');
+
     // Périmètre métier de l'utilisateur connecté (sélecteur de site).
     // Déclaré avant la ressource pour ne pas être capté par sites/{site}.
     Route::get('sites/perimetre', [SiteController::class, 'perimetre'])->name('sites.perimetre');
@@ -186,5 +208,37 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('caisses', CaisseController::class)
             ->parameters(['caisses' => 'caisse']);
         Route::apiResource('cartes', CarteController::class);
+    });
+
+    // Module Reporting — lecture seule (agrégations JSON pour le front).
+    Route::prefix('reporting')->name('reporting.')->group(function () {
+        // Tableau de bord de tête : une réponse agrégée transversale.
+        Route::get('dashboard', [ReportingDashboardController::class, 'index'])->name('dashboard');
+
+        Route::prefix('food-cost')->name('food-cost.')->group(function () {
+            Route::get('produits', [ReportingFoodCostController::class, 'produits'])->name('produits');
+            Route::get('points-de-vente', [ReportingFoodCostController::class, 'pointsDeVente'])->name('points-de-vente');
+            Route::get('synthese', [ReportingFoodCostController::class, 'synthese'])->name('synthese');
+        });
+
+        Route::prefix('ventes')->name('ventes.')->group(function () {
+            Route::get('points-de-vente', [ReportingVentesController::class, 'pointsDeVente'])->name('points-de-vente');
+            Route::get('produits', [ReportingVentesController::class, 'produits'])->name('produits');
+            Route::get('modes-paiement', [ReportingVentesController::class, 'modesPaiement'])->name('modes-paiement');
+            Route::get('serveurs', [ReportingVentesController::class, 'serveurs'])->name('serveurs');
+            Route::get('evolution', [ReportingVentesController::class, 'evolution'])->name('evolution');
+        });
+
+        Route::prefix('stock')->name('stock.')->group(function () {
+            Route::get('valorisation', [ReportingStockController::class, 'valorisation'])->name('valorisation');
+            Route::get('consommation', [ReportingStockController::class, 'consommation'])->name('consommation');
+            Route::get('ecarts-inventaire', [ReportingStockController::class, 'ecartsInventaire'])->name('ecarts-inventaire');
+            Route::get('alertes', [ReportingStockController::class, 'alertes'])->name('alertes');
+        });
+
+        Route::prefix('budget')->name('budget.')->group(function () {
+            Route::get('consommation', [ReportingBudgetController::class, 'consommation'])->name('consommation');
+            Route::get('depenses', [ReportingBudgetController::class, 'depenses'])->name('depenses');
+        });
     });
 });

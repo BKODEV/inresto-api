@@ -50,6 +50,22 @@
     interdit dans `resources/views/pdf/**`. Seule modif métier autorisée :
     colonne `reference_facture_normalisee` sur `commandes_client`.
 
+- **NOUVEAU — Correctifs logo + périmètre super-admin.**
+  - **Logo établissement** : l'échec « Téléversement impossible » venait de PHP
+    (`post_max_size`/`upload_max_filesize` = **2M**), pas de Laravel — coupure au
+    *Request Startup* avant validation. Corrigé côté **php.ini Herd → 8M** (dev).
+    ⚠️ **à répliquer en prod** (php.ini / pool FPM). La règle applicative
+    `logo max:2048` redevient le vrai garde-fou (422 propre). Aucun code modifié.
+  - **Super-admin = tous les sites (bypass, décision actée [[module-utilisateurs-roles]])** :
+    `User::sitesPerimetre()` (tous les sites actifs si super-admin, sinon `user_site`
+    actifs) branchée sur `GET /sites/perimetre` + payload login/`/auth/me`. Pas de
+    rattachement `user_site` forcé. `created_by` inchangé (orthogonal au pivot).
+  - **Non-bug clarifié** : l'en-tête « Site principal » du bon de commande PDF suit
+    le site **sélectionné dans la topbar** (backend honore `?site_id=`), pas un
+    rattachement figé — le super-admin a déjà les 3 sites (il a `site.view`).
+  - Correctif test : `SeedDemoDataTest` seed désormais les rôles (`seedRbac()`)
+    avant `inresto:demo` (contrat : `db:seed` avant la démo). **351 tests verts.**
+
 ## Git
 
 - **Committé** : socle + stock + achats + recettes + inventaires + Module Salle

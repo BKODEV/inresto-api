@@ -93,7 +93,8 @@ class AuthController extends Controller
             'roles' => $user->getRoleNames(),
             'permissions' => $user->getAllPermissions()->pluck('name'),
             // Périmètre métier : sites de rattachement de l'utilisateur (cuisine/stock/budget).
-            'sites' => $user->sites->map(fn (Site $site) => [
+            // Le super-admin n'est borné par aucun périmètre : il obtient tous les sites actifs.
+            'sites' => $user->sitesPerimetre()->map(fn (Site $site) => [
                 'id' => $site->id,
                 'nom' => $site->nom,
                 'code' => $site->code,

@@ -101,17 +101,26 @@ class SeedDemoData extends Command
     }
 
     /**
-     * Un utilisateur d'exploitation par site, rattaché à ce site comme site
-     * principal. Le périmètre métier de l'utilisateur est le site.
+     * Une équipe d'exploitation complète par site : un utilisateur par rôle
+     * opérationnel (hors super-admin), rattaché à ce site comme périmètre
+     * métier. Permet de tester le RBAC site par site en démo.
+     *
+     * Suppose les rôles système déjà présents (lancer `inresto:install` ou
+     * `db:seed` avant cette commande).
      *
      * @param  Collection<int, Site>  $sites
      */
     private function creerUtilisateurs(Collection $sites): void
     {
-        $sites->each(function (Site $site): void {
-            $user = User::factory()->create();
+        $rolesOperationnels = ['gerant', 'chef-cuisine', 'econome', 'caissier', 'serveur'];
 
-            $user->sites()->attach($site->id);
+        $sites->each(function (Site $site) use ($rolesOperationnels): void {
+            foreach ($rolesOperationnels as $role) {
+                $user = User::factory()->create();
+
+                $user->sites()->attach($site->id);
+                $user->syncRoles([$role]);
+            }
         });
     }
 

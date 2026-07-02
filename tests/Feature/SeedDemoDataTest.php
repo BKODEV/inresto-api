@@ -15,6 +15,10 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 uses(RefreshDatabase::class);
 
 it('génère un jeu de démonstration complet de bout en bout', function () {
+    // La commande suppose les rôles système déjà seedés (contrat : `db:seed`
+    // avant `inresto:demo`) pour rattacher une équipe d'exploitation par site.
+    seedRbac();
+
     $this->artisan('inresto:demo', ['--force' => true])->assertSuccessful();
 
     // Définitions partagées des nouveaux modules.

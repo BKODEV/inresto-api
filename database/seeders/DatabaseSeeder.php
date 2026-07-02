@@ -15,8 +15,11 @@ class DatabaseSeeder extends Seeder
         // Les données de démonstration se génèrent via : php artisan inresto:demo
         // SiteSeeder avant SuperAdminSeeder : le super-admin est rattaché au
         // site PRINCIPAL, qui doit donc déjà exister.
+        // RoleSeeder après PermissionSeeder (assigne des permissions existantes)
+        // et avant SuperAdminSeeder (le super-admin reçoit le rôle système).
         $this->call([
             PermissionSeeder::class,
+            RoleSeeder::class,
             SiteSeeder::class,
             SuperAdminSeeder::class,
         ]);

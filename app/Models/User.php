@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\Statut;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -11,10 +12,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Collection;
 use Laravel\Sanctum\HasApiTokens;
 use Spatie\Permission\Traits\HasRoles;
 
-#[Fillable(['nom', 'prenom', 'identifiant', 'email', 'password', 'telephone', 'photo', 'pin_code', 'statut', 'last_login_at'])]
+#[Fillable(['nom', 'prenom', 'identifiant', 'email', 'password', 'telephone', 'photo', 'pin_code', 'statut', 'last_login_at', 'created_by', 'updated_by'])]
 #[Hidden(['password', 'remember_token', 'pin_code'])]
 class User extends Authenticatable
 {
@@ -34,6 +36,8 @@ class User extends Authenticatable
         'pin_code',
         'statut',
         'last_login_at',
+        'created_by',
+        'updated_by',
     ];
 
     protected $hidden = [
@@ -58,6 +62,26 @@ class User extends Authenticatable
         return $this->belongsToMany(Site::class, 'user_site');
     }
 
+    /**
+     * Périmètre effectif de sites (actifs) de l'utilisateur : ses sites de
+     * rattachement, ou **tous les sites actifs** pour le super-admin, qui n'est
+     * borné par aucun périmètre (cohérent avec les Policies et le reporting).
+     * Alimente le sélecteur de site et le payload de connexion.
+     *
+     * @return Collection<int, Site>
+     */
+    public function sitesPerimetre(): Collection
+    {
+        $query = $this->isSuperAdmin()
+            ? Site::query()
+            : $this->sites();
+
+        return $query
+            ->where('statut', Statut::Actif->value)
+            ->orderBy('nom')
+            ->get();
+    }
+
     // Connexion par identifiant au lieu de email
     public function getAuthIdentifierName(): string
     {
@@ -71,6 +95,25 @@ class User extends Authenticatable
 
     public function isSuperAdmin(): bool
     {
-        return $this->hasRole('super-admin');
+        return $this->hasRole(Role::SUPER_ADMIN);
+    }
+
+    /**
+     * Niveau de sécurité le plus élevé parmi les rôles de l'utilisateur (0 sinon).
+     * Pivot de la hiérarchie anti-escalade.
+     */
+    public function niveauMax(): int
+    {
+        return (int) $this->roles->max('niveau');
+    }
+
+    /**
+     * L'utilisateur partage-t-il au moins un site (périmètre) avec un autre ?
+     */
+    public function partageSiteAvec(User $autre): bool
+    {
+        return $this->sites->pluck('id')
+            ->intersect($autre->sites->pluck('id'))
+            ->isNotEmpty();
     }
 }

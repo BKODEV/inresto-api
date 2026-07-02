@@ -10,9 +10,11 @@ use App\Exceptions\PaiementException;
 use App\Exceptions\ProduitException;
 use App\Exceptions\ReceptionException;
 use App\Exceptions\RemiseException;
+use App\Exceptions\RoleException;
 use App\Exceptions\SessionCaisseException;
 use App\Exceptions\SousRecetteException;
 use App\Exceptions\TableSalleException;
+use App\Exceptions\UserException;
 use App\Helpers\ApiResponse;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
@@ -83,6 +85,14 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         $exceptions->render(function (AnnulationException $e) {
+            return ApiResponse::custom($e->status, 'error', $e->getMessage());
+        });
+
+        $exceptions->render(function (UserException $e) {
+            return ApiResponse::custom($e->status, 'error', $e->getMessage());
+        });
+
+        $exceptions->render(function (RoleException $e) {
             return ApiResponse::custom($e->status, 'error', $e->getMessage());
         });
 

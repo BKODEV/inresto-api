@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api;
 
-use App\Enums\Statut;
 use App\Helpers\ApiResponse;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Site\StoreSiteRequest;
@@ -38,11 +37,7 @@ class SiteController extends Controller
      */
     public function perimetre(Request $request): JsonResponse
     {
-        $sites = $request->user()
-            ->sites()
-            ->where('statut', Statut::Actif->value)
-            ->orderBy('nom')
-            ->get();
+        $sites = $request->user()->sitesPerimetre();
 
         return ApiResponse::success(
             ['sites' => SiteResource::collection($sites)],
