@@ -4,13 +4,12 @@ declare(strict_types=1);
 
 namespace App\Services;
 
-use App\Enums\Statut;
 use App\Enums\StatutCommandeFournisseur;
 use App\Exceptions\CommandeFournisseurException;
+use App\Models\CatalogueFournisseur;
 use App\Models\CommandeFournisseur;
 use App\Models\LigneCommandeFournisseur;
 use App\Models\MatierePremiere;
-use App\Models\UniteDeMesure;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -104,10 +103,12 @@ class CommandeFournisseurService
         $this->assertModifiable($commande);
 
         return DB::transaction(function () use ($ligne, $donnees, $commande): LigneCommandeFournisseur {
-            $this->assertReferencesActives(
-                (int) ($donnees['matiere_premiere_id'] ?? $ligne->matiere_premiere_id),
-                (int) ($donnees['unite_id'] ?? $ligne->unite_id),
-            );
+            $matiereId = (int) ($donnees['matiere_premiere_id'] ?? $ligne->matiere_premiere_id);
+            $this->assertMatiereActive($matiereId);
+
+            $donnees['matiere_premiere_id'] = $matiereId;
+            // L'unité suit TOUJOURS le catalogue (unité d'achat), jamais le payload.
+            $donnees['unite_id'] = $this->uniteAchatCatalogue($commande->fournisseur_id, $matiereId);
 
             $ligne->fill($donnees);
             $ligne->save();
@@ -226,11 +227,15 @@ class CommandeFournisseurService
      */
     private function creerLigne(CommandeFournisseur $commande, array $donnees): LigneCommandeFournisseur
     {
-        $this->assertReferencesActives((int) $donnees['matiere_premiere_id'], (int) $donnees['unite_id']);
+        $matiereId = (int) $donnees['matiere_premiere_id'];
+        $this->assertMatiereActive($matiereId);
 
         return $commande->lignes()->create([
-            'matiere_premiere_id' => $donnees['matiere_premiere_id'],
-            'unite_id' => $donnees['unite_id'],
+            'matiere_premiere_id' => $matiereId,
+            // Unité imposée par le catalogue (unité d'achat du couple
+            // fournisseur/matière) : c'est elle qui porte le facteur de
+            // conversion du PMP à la réception. Jamais choisie par le client.
+            'unite_id' => $this->uniteAchatCatalogue($commande->fournisseur_id, $matiereId),
             'quantite_commandee' => $donnees['quantite_commandee'],
             'prix_unitaire_previsionnel' => $donnees['prix_unitaire_previsionnel'],
         ]);
@@ -262,21 +267,37 @@ class CommandeFournisseurService
     }
 
     /**
-     * La matière première et l'unité référencées doivent exister et être actives.
+     * La matière première référencée doit exister et être active.
      *
      * @throws CommandeFournisseurException
      */
-    private function assertReferencesActives(int $matierePremiereId, int $uniteId): void
+    private function assertMatiereActive(int $matierePremiereId): void
     {
         $matiere = MatierePremiere::find($matierePremiereId);
         if ($matiere === null || ! $matiere->isActif()) {
             throw CommandeFournisseurException::matiereInactive($matierePremiereId);
         }
+    }
 
-        $unite = UniteDeMesure::find($uniteId);
-        if ($unite === null || $unite->statut !== Statut::Actif) {
-            throw CommandeFournisseurException::uniteInactive($uniteId);
+    /**
+     * Unité d'achat du couple (fournisseur, matière) au catalogue : l'unité de
+     * TOUTE ligne de commande (elle porte le facteur de conversion du PMP). La
+     * règle MatiereAuCatalogue garantit son existence en amont ; défensif ici.
+     *
+     * @throws CommandeFournisseurException
+     */
+    private function uniteAchatCatalogue(int $fournisseurId, int $matiereId): int
+    {
+        $uniteId = CatalogueFournisseur::query()
+            ->where('fournisseur_id', $fournisseurId)
+            ->where('matiere_premiere_id', $matiereId)
+            ->value('unite_achat_id');
+
+        if ($uniteId === null) {
+            throw CommandeFournisseurException::matiereHorsCatalogue($matiereId);
         }
+
+        return (int) $uniteId;
     }
 
     /**

@@ -23,7 +23,15 @@
 
 ## État global
 
-- **351 tests verts, Pint clean.** Tout est committé sur `main` (dernier : `8aed8d6`).
+- **359 tests verts, Pint clean.** Dernier commit `main` : `975bfff`.
+  ⚠️ **Changements en cours non commités** : seeders de référentiels d'init
+  (catégories produit/MP, unités, matières premières, 3 fournisseurs) branchés
+  dans `DatabaseSeeder` ; garde-fou catalogue (interdit de retirer une matière
+  sous commande en attente de réception) ; **cohérence unité de ligne estampée
+  serveur partout** — fiches techniques & sous-recettes (= unité de stockage
+  matière) et commande fournisseur & réception (= unité d'achat du catalogue,
+  celle qui porte le facteur PMP) ; fronts en lecture seule. NOTES-DE-GESTION.md
+  aussi enrichi (vue d'ensemble, utilisateurs/rôles, machines à états, reporting).
 - Modules livrés (back testé + front câblé) :
   - **Socle & multi-site** : sites, points de vente, caisses, périmètre user par site.
   - **Achats** : fournisseurs, catalogue, commandes fournisseur, réceptions,

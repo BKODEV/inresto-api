@@ -253,22 +253,25 @@ it('annule tout si aucun budget actif pour le site (ni stock ni dépense)', func
 it('annule tout si le facteur de conversion (catalogue) est manquant', function () {
     $fournisseur = Fournisseur::factory()->create();
     $site = siteAvecBudget();
-    $unite = UniteDeMesure::factory()->create();
-    $matiere = MatierePremiere::factory()->create(['unite_de_mesure_id' => $unite->id]);
-    // Pas d'entrée catalogue pour ce couple fournisseur/matière.
+    ['matiere' => $matiere] = matiereCataloguee($fournisseur);
 
     $commande = commandeEnvoyee($fournisseur, [[
         'matiere_premiere_id' => $matiere->id,
-        'unite_id' => $unite->id,
         'quantite_commandee' => 10,
         'prix_unitaire_previsionnel' => 4,
     ]]);
+
+    // Cas limite : le catalogue disparaît APRÈS l'envoi (suppression directe en
+    // base, hors du garde-fou API). La réception ne trouve plus ni l'unité ni le
+    // facteur -> tout est annulé (transaction).
+    CatalogueFournisseur::where('fournisseur_id', $fournisseur->id)
+        ->where('matiere_premiere_id', $matiere->id)
+        ->delete();
 
     $reception = Reception::factory()->create(['commande_fournisseur_id' => $commande->id, 'site_id' => $site->id]);
 
     expect(fn () => $this->service->confirmer($reception, [[
         'matiere_premiere_id' => $matiere->id,
-        'unite_id' => $unite->id,
         'quantite_recue' => 5,
         'prix_unitaire_reel' => 4,
     ]], $this->userId))->toThrow(ReceptionException::class);
@@ -276,6 +279,36 @@ it('annule tout si le facteur de conversion (catalogue) est manquant', function 
     expect(LigneReception::count())->toBe(0)
         ->and(MouvementStock::count())->toBe(0)
         ->and(Depense::count())->toBe(0);
+});
+
+it('estampe l\'unité d\'achat du catalogue sur la ligne de réception', function () {
+    $fournisseur = Fournisseur::factory()->create();
+    $site = siteAvecBudget();
+    $uniteAchat = UniteDeMesure::factory()->create(['symbole' => 'cagette']);
+    $matiere = MatierePremiere::factory()->create();
+    CatalogueFournisseur::factory()->create([
+        'fournisseur_id' => $fournisseur->id,
+        'matiere_premiere_id' => $matiere->id,
+        'unite_achat_id' => $uniteAchat->id,
+        'qte_par_unite_achat' => 2,
+        'prix_unitaire' => 1,
+    ]);
+
+    $commande = commandeEnvoyee($fournisseur, [[
+        'matiere_premiere_id' => $matiere->id,
+        'quantite_commandee' => 10,
+        'prix_unitaire_previsionnel' => 4,
+    ]]);
+    $reception = Reception::factory()->create(['commande_fournisseur_id' => $commande->id, 'site_id' => $site->id]);
+
+    $this->service->confirmer($reception, [[
+        'matiere_premiere_id' => $matiere->id,
+        // Aucune unité fournie : le serveur pose celle du catalogue.
+        'quantite_recue' => 10,
+        'prix_unitaire_reel' => 4,
+    ]], $this->userId);
+
+    expect((int) $reception->lignes()->first()->unite_id)->toBe($uniteAchat->id);
 });
 
 // ───────────────────────── sur-livraison ─────────────────────────

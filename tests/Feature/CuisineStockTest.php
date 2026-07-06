@@ -2,10 +2,13 @@
 
 declare(strict_types=1);
 
+use App\Enums\StatutCommandeFournisseur;
 use App\Models\Budget;
 use App\Models\CatalogueFournisseur;
 use App\Models\CategorieMatierePremiere;
+use App\Models\CommandeFournisseur;
 use App\Models\Fournisseur;
+use App\Models\LigneCommandeFournisseur;
 use App\Models\MatierePremiere;
 use App\Models\Site;
 use App\Models\UniteDeMesure;
@@ -177,6 +180,57 @@ it('vide le catalogue quand la synchronisation reçoit un tableau vide', functio
     actingAsUserAvec(['catalogue-fournisseur.create']);
     $fournisseur = Fournisseur::factory()->create();
     CatalogueFournisseur::factory()->count(2)->create(['fournisseur_id' => $fournisseur->id]);
+
+    putJson("/api/fournisseurs/{$fournisseur->id}/catalogue", ['lignes' => []])->assertOk();
+
+    expect(CatalogueFournisseur::where('fournisseur_id', $fournisseur->id)->count())->toBe(0);
+});
+
+it('refuse de retirer du catalogue une matière rattachée à une commande en attente de réception', function () {
+    actingAsUserAvec(['catalogue-fournisseur.create']);
+    $fournisseur = Fournisseur::factory()->create();
+    $matiere = MatierePremiere::factory()->create(['libelle' => 'Poulet']);
+    CatalogueFournisseur::factory()->create([
+        'fournisseur_id' => $fournisseur->id,
+        'matiere_premiere_id' => $matiere->id,
+    ]);
+
+    $commande = CommandeFournisseur::factory()
+        ->statut(StatutCommandeFournisseur::Envoyee)
+        ->create(['fournisseur_id' => $fournisseur->id]);
+    LigneCommandeFournisseur::factory()->create([
+        'commande_fournisseur_id' => $commande->id,
+        'matiere_premiere_id' => $matiere->id,
+    ]);
+
+    // Payload sans la matière => tentative de retrait.
+    putJson("/api/fournisseurs/{$fournisseur->id}/catalogue", ['lignes' => []])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('lignes');
+
+    // Le catalogue reste intact (transaction jamais atteinte).
+    $this->assertDatabaseHas('catalogue_fournisseur', [
+        'fournisseur_id' => $fournisseur->id,
+        'matiere_premiere_id' => $matiere->id,
+    ]);
+});
+
+it('autorise le retrait quand la commande de la matière est déjà clôturée', function () {
+    actingAsUserAvec(['catalogue-fournisseur.create']);
+    $fournisseur = Fournisseur::factory()->create();
+    $matiere = MatierePremiere::factory()->create();
+    CatalogueFournisseur::factory()->create([
+        'fournisseur_id' => $fournisseur->id,
+        'matiere_premiere_id' => $matiere->id,
+    ]);
+
+    $commande = CommandeFournisseur::factory()
+        ->statut(StatutCommandeFournisseur::Cloturee)
+        ->create(['fournisseur_id' => $fournisseur->id]);
+    LigneCommandeFournisseur::factory()->create([
+        'commande_fournisseur_id' => $commande->id,
+        'matiere_premiere_id' => $matiere->id,
+    ]);
 
     putJson("/api/fournisseurs/{$fournisseur->id}/catalogue", ['lignes' => []])->assertOk();
 

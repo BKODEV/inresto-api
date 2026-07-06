@@ -28,11 +28,7 @@ class StoreLigneCommandeFournisseurRequest extends FormRequest
                 Rule::exists('matieres_premieres', 'id')->where('statut', 'actif'),
                 new MatiereAuCatalogue($this->route('commande_fournisseur')->fournisseur_id),
             ],
-            'unite_id' => [
-                'required',
-                'integer',
-                Rule::exists('unites_de_mesure', 'id')->where('statut', 'actif'),
-            ],
+            // Pas d'unité au contrat : imposée par le catalogue (unité d'achat).
             'quantite_commandee' => ['required', 'numeric', 'gt:0'],
             'prix_unitaire_previsionnel' => ['required', 'numeric', 'gt:0'],
         ];

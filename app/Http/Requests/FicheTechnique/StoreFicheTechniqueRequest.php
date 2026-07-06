@@ -32,11 +32,9 @@ class StoreFicheTechniqueRequest extends FormRequest
                 'distinct',
                 Rule::exists('matieres_premieres', 'id')->where('statut', 'actif'),
             ],
-            'lignes_matieres.*.unite_id' => [
-                'required',
-                'integer',
-                Rule::exists('unites_de_mesure', 'id')->where('statut', 'actif'),
-            ],
+            // Pas d'unité au contrat : elle est TOUJOURS l'unité de stockage de
+            // la matière, estampée côté serveur (aucune conversion dimensionnelle
+            // dans les calculs de coût / déstockage).
             'lignes_matieres.*.quantite' => ['required', 'numeric', 'gt:0'],
 
             'lignes_sous_recettes' => ['sometimes', 'array'],

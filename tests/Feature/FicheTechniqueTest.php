@@ -84,6 +84,52 @@ it('crée une fiche v1 active avec coût matière calculé', function () {
         ->assertJsonPath('data.cout_matiere', '15.00');
 });
 
+it('estampe l\'unité de stockage de la matière, en ignorant l\'unité envoyée', function () {
+    actingAsFicheUser(['fichetechnique.create']);
+    $produit = Produit::factory()->create();
+    $uniteStockage = UniteDeMesure::factory()->create(['symbole' => 'kg']);
+    $matiere = MatierePremiere::factory()->create(['unite_de_mesure_id' => $uniteStockage->id]);
+    $uniteIncoherente = UniteDeMesure::factory()->create(['symbole' => 'L']);
+
+    postJson('/api/fiches-techniques', [
+        'produit_id' => $produit->id,
+        'lignes_matieres' => [
+            // Le client tente une unité incohérente (litres pour une matière en kg).
+            ['matiere_premiere_id' => $matiere->id, 'unite_id' => $uniteIncoherente->id, 'quantite' => 2],
+        ],
+    ])->assertCreated();
+
+    // La ligne est enregistrée avec l'unité de stockage, pas celle envoyée.
+    $this->assertDatabaseHas('lignes_fiche_technique', [
+        'matiere_premiere_id' => $matiere->id,
+        'unite_id' => $uniteStockage->id,
+    ]);
+    $this->assertDatabaseMissing('lignes_fiche_technique', [
+        'matiere_premiere_id' => $matiere->id,
+        'unite_id' => $uniteIncoherente->id,
+    ]);
+});
+
+it('crée la fiche sans qu\'aucune unité ne soit fournie dans le payload', function () {
+    actingAsFicheUser(['fichetechnique.create']);
+    $produit = Produit::factory()->create();
+    $matiere = matiereAvecCoutCatalogue(5);
+
+    postJson('/api/fiches-techniques', [
+        'produit_id' => $produit->id,
+        'lignes_matieres' => [
+            ['matiere_premiere_id' => $matiere->id, 'quantite' => 3],
+        ],
+    ])
+        ->assertCreated()
+        ->assertJsonPath('data.cout_matiere', '15.00');
+
+    $this->assertDatabaseHas('lignes_fiche_technique', [
+        'matiere_premiere_id' => $matiere->id,
+        'unite_id' => $matiere->unite_de_mesure_id,
+    ]);
+});
+
 it('garde le meilleur prix catalogue (MIN) parmi plusieurs fournisseurs', function () {
     actingAsFicheUser(['fichetechnique.create']);
     $produit = Produit::factory()->create();

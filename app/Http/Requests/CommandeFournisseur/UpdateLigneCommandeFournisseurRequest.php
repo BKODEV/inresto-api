@@ -28,11 +28,8 @@ class UpdateLigneCommandeFournisseurRequest extends FormRequest
                 Rule::exists('matieres_premieres', 'id')->where('statut', 'actif'),
                 new MatiereAuCatalogue($this->route('commande_fournisseur')->fournisseur_id),
             ],
-            'unite_id' => [
-                'sometimes',
-                'integer',
-                Rule::exists('unites_de_mesure', 'id')->where('statut', 'actif'),
-            ],
+            // Pas d'unité au contrat : imposée par le catalogue (unité d'achat).
+            // Changer de matière ré-estampe automatiquement l'unité côté serveur.
             'quantite_commandee' => ['sometimes', 'numeric', 'gt:0'],
             'prix_unitaire_previsionnel' => ['sometimes', 'numeric', 'gt:0'],
         ];

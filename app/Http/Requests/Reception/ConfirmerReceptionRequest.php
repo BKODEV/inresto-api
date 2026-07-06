@@ -32,11 +32,8 @@ class ConfirmerReceptionRequest extends FormRequest
                 'integer',
                 Rule::exists('matieres_premieres', 'id')->where('statut', 'actif'),
             ],
-            'lignes.*.unite_id' => [
-                'required',
-                'integer',
-                Rule::exists('unites_de_mesure', 'id')->where('statut', 'actif'),
-            ],
+            // Pas d'unité au contrat : imposée par le catalogue (unité d'achat),
+            // celle-là même qui porte le facteur de conversion du PMP.
             'lignes.*.quantite_recue' => ['required', 'numeric', 'gt:0'],
             'lignes.*.prix_unitaire_reel' => ['required', 'numeric', 'gt:0'],
         ];

@@ -43,6 +43,18 @@ enum StatutCommandeFournisseur: string
     }
 
     /**
+     * États d'une commande encore susceptible d'être réceptionnée : elle dépend
+     * donc toujours du catalogue fournisseur (facteur de conversion lu à la
+     * réception). Sert de garde-fou avant tout retrait au catalogue.
+     *
+     * @return self[]
+     */
+    public static function enAttenteDeReception(): array
+    {
+        return [self::Envoyee, self::PartiellementRecue];
+    }
+
+    /**
      * La commande n'est modifiable (lignes, quantités, prix, entête) qu'en
      * brouillon. Tout autre état la verrouille en écriture.
      */

@@ -75,6 +75,56 @@ it('crée une sous-recette avec ses lignes et calcule le coût matière', functi
         ->assertJsonCount(2, 'data.lignes');
 });
 
+it('estampe l\'unité de stockage de la matière sur la ligne, en ignorant l\'unité envoyée', function () {
+    actingAsSousRecetteUser(['sousrecette.create']);
+    $uniteProduite = UniteDeMesure::factory()->create(['symbole' => 'L']);
+    $uniteStockage = UniteDeMesure::factory()->create(['symbole' => 'kg']);
+    $matiere = MatierePremiere::factory()->create(['unite_de_mesure_id' => $uniteStockage->id]);
+    $uniteIncoherente = UniteDeMesure::factory()->create(['symbole' => 'cl']);
+
+    postJson('/api/sous-recettes', [
+        'libelle' => 'Fond de sauce',
+        'quantite_produite' => 3,
+        'unite_id' => $uniteProduite->id, // unité produite : libre, conservée
+        'lignes' => [
+            // Le client tente une unité de ligne incohérente : elle doit être ignorée.
+            ['matiere_premiere_id' => $matiere->id, 'unite_id' => $uniteIncoherente->id, 'quantite' => 2],
+        ],
+    ])->assertCreated()
+        ->assertJsonPath('data.unite_id', $uniteProduite->id); // entête inchangée
+
+    $this->assertDatabaseHas('lignes_sous_recette', [
+        'matiere_premiere_id' => $matiere->id,
+        'unite_id' => $uniteStockage->id,
+    ]);
+    $this->assertDatabaseMissing('lignes_sous_recette', [
+        'matiere_premiere_id' => $matiere->id,
+        'unite_id' => $uniteIncoherente->id,
+    ]);
+});
+
+it('crée la sous-recette sans qu\'aucune unité de ligne ne soit fournie', function () {
+    actingAsSousRecetteUser(['sousrecette.create']);
+    $unite = UniteDeMesure::factory()->create();
+    $matiere = matiereAvecPmp(10); // 2 × 10 = 20
+
+    postJson('/api/sous-recettes', [
+        'libelle' => 'Sans unité ligne',
+        'quantite_produite' => 1,
+        'unite_id' => $unite->id,
+        'lignes' => [
+            ['matiere_premiere_id' => $matiere->id, 'quantite' => 2],
+        ],
+    ])
+        ->assertCreated()
+        ->assertJsonPath('data.cout_matiere', '20.00');
+
+    $this->assertDatabaseHas('lignes_sous_recette', [
+        'matiere_premiere_id' => $matiere->id,
+        'unite_id' => $matiere->unite_de_mesure_id,
+    ]);
+});
+
 it('utilise la moyenne des PMP de tous les sites', function () {
     actingAsSousRecetteUser(['sousrecette.create']);
     $unite = UniteDeMesure::factory()->create();

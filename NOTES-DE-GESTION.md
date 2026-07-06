@@ -7,15 +7,91 @@
 
 ## Sommaire
 
+- [Vue d'ensemble du domaine](#vue-densemble-du-domaine)
 - [Unités de mesure & conversion d'achat](#unités-de-mesure--conversion-dachat)
 - [Qui a le droit d'écrire le stock](#qui-a-le-droit-décrire-le-stock)
 - [Deux notions de coût : valorisation (PMP) vs référence (catalogue)](#deux-notions-de-coût--valorisation-pmp-vs-référence-catalogue)
+- [Comment le coût de référence (meilleur prix catalogue) est calculé](#comment-le-coût-de-référence-meilleur-prix-catalogue-est-calculé)
+- [Comment le PMP est calculé](#comment-le-pmp-est-calculé)
+- [PMP vs FIFO : pourquoi on a choisi le PMP](#pmp-vs-fifo--pourquoi-on-a-choisi-le-pmp)
 - [Définitions partagées vs opérations rattachées au site](#définitions-partagées-vs-opérations-rattachées-au-site)
+- [Utilisateurs, rôles & permissions](#utilisateurs-rôles--permissions)
 - [Versioning des fiches techniques](#versioning-des-fiches-techniques)
 - [Prix de vente porté par la carte, pas par le produit](#prix-de-vente-porté-par-la-carte-pas-par-le-produit)
 - [Une seule session de caisse ouverte par caisse](#une-seule-session-de-caisse-ouverte-par-caisse)
 - [Déstockage à la vente : au service, jamais bloquant](#déstockage-à-la-vente--au-service-jamais-bloquant)
 - [Encaissement, remises encadrées & annulations](#encaissement-remises-encadrées--annulations)
+- [Machines à états — mémo transversal](#machines-à-états--mémo-transversal)
+- [Pilotage / Reporting : lecture seule, adossé au « vendu »](#pilotage--reporting--lecture-seule-adossé-au--vendu-)
+
+---
+
+## Vue d'ensemble du domaine
+
+> À lire en premier : le fil qui relie tous les objets. Les sections suivantes
+> détaillent chaque règle ; celle-ci donne la carte.
+
+InResto pilote une chaîne **de l'achat à l'encaissement**, sur plusieurs sites.
+Tout tourne autour d'**une matière première valorisée par site** (son stock, son
+coût) et d'**une recette** qui la transforme en **produit vendu**.
+
+### Le flux, de bout en bout
+
+```
+ RÉFÉRENTIELS PARTAGÉS (aucun site)          OPÉRATIONS (rattachées à UN site)
+ ───────────────────────────────────         ──────────────────────────────────
+ Fournisseur                                  
+   └─ Catalogue (prix + qte_par_unite_achat)  
+        │  on ne commande qu'au catalogue     
+        ▼                                      
+ Commande fournisseur ─────envoi────►  Réception ──►  Stock du site (+ PMP)
+   (engagement, 0 stock)                 (SEULE entrée)    + Dépense (budget du site)
+                                                              ▲
+ Matière première (unité de stockage)  ───────────────────────┘
+   │
+   ├─►  Sous-recette   (coût = Σ qté × PMP moyen multi-site)
+   │        │
+   └─►  Fiche technique VERSIONNÉE
+            (coût = matières au meilleur catalogue + sous-recettes au PMP)
+                 │  décrit la recette d'UN…
+                 ▼
+ Produit (sans prix) ──inscrit sur──►  Carte (porte le prix de vente)
+                                          │  rattachée à un Point de vente / Caisse
+                                          ▼
+ Table de salle ─► Session de caisse (ouverte) ─► Commande client ─► lignes
+                                                        │
+                              passage « servie » ──────►│──►  Sortie de stock du site
+                              (déstocke via la fiche FIGÉE)     (via StockService)
+                                                        ▼
+                              Paiements / Remises / Annulations ─► Encaissement
+                                                        │
+                                                        ▼
+                              Inventaire (corrige le stock)   Reporting (lecture seule)
+```
+
+### Les grands objets en une ligne
+
+| Objet | Rôle métier | Partagé / par site |
+|---|---|---|
+| **Fournisseur / Catalogue** | Qui vend quoi, à quel prix, sous quel conditionnement | Partagé |
+| **Matière première** | L'ingrédient, avec **une** unité de stockage | Partagé (déf.) / stock par site |
+| **Commande fournisseur** | Engagement d'achat au catalogue — **ne touche pas** le stock | — |
+| **Réception** | **Seule** entrée de stock ; convertit l'achat, recalcule le PMP, crée la dépense | Site |
+| **Sous-recette** | Préparation intermédiaire (fond de sauce…), indicateur cuisine au **PMP** | Partagé |
+| **Fiche technique** | Recette d'un produit, **versionnée**, coût de **référence** (catalogue) | Partagé |
+| **Produit / Carte** | Le produit n'a **pas** de prix ; le prix vit sur la **carte** | Partagé |
+| **Session de caisse / Commande client** | La vente en salle, du couvert à l'encaissement | Site (via PDV) |
+| **Inventaire** | Le **seul** juge de paix des écarts de stock | Site |
+| **Budget / Dépense** | L'enveloppe et sa consommation | Site |
+| **Reporting** | Synthèses **lecture seule** (ne modifie jamais rien) | Site + périmètre |
+
+### Les 5 invariants à retenir
+
+1. **Le stock ne bouge qu'à 3 endroits** (réception, vente servie, inventaire), tous via le `StockService` — [[Qui a le droit d'écrire le stock]].
+2. **Deux coûts distincts, jamais confondus** : le **PMP** (ce que vaut le stock réel) et le **coût de référence catalogue** (ce que devrait coûter une recette).
+3. **Définitions partagées, opérations par site** : une matière/fiche est commune, son stock et son budget sont propres à chaque cuisine.
+4. **Une unité = une étiquette** : aucune conversion dimensionnelle, sauf le facteur d'achat appliqué **à la réception**.
+5. **Traçabilité par figement** : la fiche utilisée à la vente et la version de recette sont **figées** pour que l'histoire (coût, composition) reste vraie.
 
 ---
 
@@ -49,7 +125,16 @@ Points clés :
   et `pmp` sont toujours exprimés dans cette unité.
 - **Unité de stockage = unité d'usage.** Les fiches techniques / recettes
   consommeront la matière dans cette même unité — pas de distinction usage/stockage,
-  pas de double conversion interne.
+  pas de double conversion interne. **Garanti côté serveur** : une ligne de
+  **fiche technique** comme de **sous-recette** ne choisit **pas** son unité —
+  le service (`FicheTechniqueService` / `SousRecetteService`) y estampe toujours
+  l'unité de stockage de la matière (l'`unite_id` éventuellement envoyé par le
+  client est ignoré). Sans conversion dimensionnelle, une unité libre sur la
+  ligne (ex. « litre » pour une matière en kg) fausserait silencieusement le
+  coût *et* le déstockage ; le front l'affiche donc en lecture seule. À ne pas
+  confondre avec `sous_recettes.unite_id`, l'unité **produite** par la
+  sous-recette (celle-là reste libre : c'est une vraie étiquette sans matière à
+  laquelle s'aligner).
 - `catalogue_fournisseur.prix_unitaire` est exprimé **par unité d'achat**
   (ex. prix par cagette), alors que `matieres_premieres.pmp` est **par unité de
   stockage** (ex. par kg). Le passage de l'un à l'autre = la division par
@@ -57,6 +142,13 @@ Points clés :
 - `qte_par_unite_achat` (`decimal 10,3`, défaut `1`, requis et `> 0` à l'API) =
   « combien d'unités de stockage dans 1 unité d'achat de CE fournisseur ». Le
   défaut `1` couvre le cas identité (on achète et on stocke dans la même unité).
+- **L'unité d'une ligne d'achat = l'unité d'achat du catalogue, jamais libre.**
+  Une ligne de **commande fournisseur** comme de **réception** ne choisit pas son
+  unité : le serveur y estampe l'`unite_achat_id` du catalogue pour le couple
+  (fournisseur, matière) — celle-là même qui porte `qte_par_unite_achat`, donc la
+  conversion du PMP. Laisser choisir une autre unité divergerait du facteur et
+  **fausserait silencieusement le PMP** (`quantite × facteur` et
+  `prix ÷ facteur`). Le front l'affiche en lecture seule.
 
 ### Exemple déroulé : la Tomate, stockée en kg
 
@@ -64,37 +156,37 @@ Points clés :
 entre elles dans le système.
 
 **Étape 2 — Matière.** Elle crée *Tomate* avec **unité de stockage = kg**.
-Désormais `stock_courant = 100` signifie **100 kg**, et `pmp = 1,28` signifie
-**1,28 € / kg**.
+Désormais `stock_courant = 100` signifie **100 kg**, et `pmp = 800` signifie
+**800 FCFA / kg**.
 
 **Étape 3 — Catalogue fournisseur.** Le conditionnement varie d'un fournisseur à
 l'autre, donc chaque ligne porte son propre facteur :
 
 | Fournisseur | `unite_achat_id` | `prix_unitaire` (par unité d'achat) | `qte_par_unite_achat` |
 |---|---|---|---|
-| Primeur Dupont | cagette | 30 € / cagette | 25 (1 cagette = 25 kg) |
-| Grossiste Martin | kg | 1,40 € / kg | 1 (cas identité) |
+| Primeur Dupont | cagette | 19 000 FCFA / cagette | 25 (1 cagette = 25 kg) |
+| Grossiste Martin | kg | 850 FCFA / kg | 1 (cas identité) |
 
 **Étape 4 — Réception (la SEULE conversion).** La cheffe reçoit **4 cagettes** de
-Primeur Dupont, prix réel facturé **32 €/cagette**. Le module réception applique :
+Primeur Dupont, prix réel facturé **20 000 FCFA/cagette**. Le module réception applique :
 
 ```
 Quantité en stockage = quantite_recue × qte_par_unite_achat
                      = 4 × 25 = 100 kg
 
 Prix par unité de stockage = prix_unitaire_reel ÷ qte_par_unite_achat
-                          = 32 ÷ 25 = 1,28 € / kg
+                          = 20 000 ÷ 25 = 800 FCFA / kg
 ```
 
 Puis il appelle le `StockService` avec des valeurs **déjà en unité de stockage** :
 
 ```
-StockService::entree(matiere = Tomate, quantite = 100 /* kg */, prixReel = 1,28 /* €/kg */, …)
+StockService::entree(matiere = Tomate, quantite = 100 /* kg */, prixReel = 800 /* FCFA/kg */, …)
 ```
 
-Le `StockService` ne voit jamais « cagette » ni « 32 € » : il reçoit du kg et du
-€/kg, ajoute au `stock_courant` et recalcule le `pmp`. **Il ne convertit rien** —
-c'est son contrat.
+Le `StockService` ne voit jamais « cagette » ni « 20 000 FCFA » : il reçoit du kg
+et du FCFA/kg, ajoute au `stock_courant` et recalcule le `pmp`. **Il ne convertit
+rien** — c'est son contrat.
 
 ### Schéma mental
 
@@ -171,14 +263,88 @@ chercher à les unifier.
 - **Coût d'une sous-recette** = `Σ quantité × PMP moyen multi-site`. C'est un
   **indicateur cuisine** (ce que coûte réellement la prod aujourd'hui), **pas**
   une valorisation comptable.
-- **Coût d'une fiche technique** = basé sur le **meilleur prix catalogue**
-  (référence), **jamais** le PMP. C'est un coût-cible théorique, stable, qui ne
-  bouge pas quand le stock fluctue.
+- **Coût d'une fiche technique** = **matières directes** valorisées au **meilleur
+  prix catalogue** (référence, stable) **+** portion **sous-recettes** héritée de
+  leur `cout_matiere`, lui-même **basé sur le PMP**. Donc : une fiche **sans**
+  sous-recette est un coût-cible **pur catalogue** (jamais le PMP) ; dès qu'elle
+  **contient** une sous-recette, cette part-là est valorisée au **PMP** — la fiche
+  mélange alors les deux. Détail du calcul ci-dessous.
 
 > **Pourquoi deux coûts ?** Le PMP suit la réalité (il monte si on a acheté cher
 > récemment) ; le coût de référence sert à fixer un prix de vente et juger la
 > marge théorique. Mélanger les deux ferait varier le coût d'une recette au gré
 > des achats, rendant tout pilotage de marge impossible.
+
+---
+
+## Comment le coût de référence (meilleur prix catalogue) est calculé
+
+### La formule (en clair)
+
+Le coût de référence d'une fiche technique (`fiches_techniques.cout_matiere`) est
+la **somme de deux parts**, recalculée à la volée (`FicheTechniqueService::recalculerCoutMatiere`) :
+
+**Part 1 — matières directes.** Pour chaque matière de la fiche :
+
+```
+coût ligne = quantité (en unité de stockage) × meilleur prix catalogue de la matière
+
+meilleur prix catalogue = MIN, sur TOUS les fournisseurs qui cataloguent la matière, de :
+                          prix_unitaire ÷ qte_par_unite_achat
+```
+
+- `prix_unitaire` est exprimé **par unité d'achat** (ex. par cagette). La division
+  par `qte_par_unite_achat` le ramène **par unité de stockage** (ex. par kg) — le
+  même pivot qu'à la réception (cf. « Unités de mesure & conversion d'achat »).
+- On prend le **MIN** parce que c'est le *meilleur* prix : ce que coûterait la
+  matière achetée au fournisseur le moins cher.
+- Matière **hors catalogue** (aucun fournisseur) → coût **0**. Pas d'erreur, mais
+  la fiche est alors **sous-évaluée** : c'est un signal de paramétrage à combler.
+
+**Part 2 — portion sous-recettes.** Pour chaque sous-recette de la fiche :
+
+```
+coût = (sous_recette.cout_matiere ÷ quantite_produite) × quantité utilisée
+```
+
+⚠️ `sous_recette.cout_matiere` est **basé sur le PMP** (cf. « Comment le PMP est
+calculé » et le coût des sous-recettes), **pas** sur le catalogue. Cette part
+n'est donc **pas** au meilleur prix catalogue — voir l'encadré plus bas.
+
+Le total est **arrondi à 2 décimales** et figé dans `fiches_techniques.cout_matiere`.
+
+### Exemple déroulé
+
+Fiche « Poulet braisé » :
+
+| Ligne | Détail | Coût |
+|---|---|---|
+| Poulet (matière directe) | 0,25 kg × **meilleur prix catalogue 2 500 FCFA/kg** | 625 FCFA |
+| Fond de sauce (sous-recette) | la sous-recette produit **2 L** pour un `cout_matiere` de **3 000 FCFA** (au PMP) → 3 000 ÷ 2 = **1 500 FCFA/L**, puis × 0,30 L | 450 FCFA |
+
+```
+cout_matiere = 625  +  450  =  1 075 FCFA
+               (catalogue)  (PMP, via la sous-recette)
+```
+
+La matière directe (poulet) est au prix catalogue ; le fond de sauce entre au PMP :
+**la même fiche mélange les deux référentiels**.
+
+### Pourquoi la portion sous-recette échappe au catalogue
+
+Une sous-recette (« fond de sauce ») **ne s'achète pas** à un fournisseur : elle
+n'a donc **aucun prix catalogue propre**. Elle a été conçue comme un **indicateur
+cuisine** valorisé au PMP (« combien coûte réellement cette prod aujourd'hui »).
+La fiche technique **réutilise** cette valeur déjà calculée plutôt que de
+ré-exploser la sous-recette en matières et de les re-tarifer au meilleur prix
+catalogue.
+
+> **Conséquence assumée** : une fiche **sans** sous-recette est un coût de
+> référence **pur catalogue** (stable, insensible au stock) ; une fiche **avec**
+> sous-recette **mélange** catalogue (matières directes) et PMP (part
+> sous-recette), qui lui, bouge avec les achats. À garder en tête pour le
+> pilotage de marge. Rendre le coût *purement* catalogue supposerait d'exploser
+> les sous-recettes en matières et de les tarifer au catalogue — non fait à ce jour.
 
 ---
 
@@ -200,20 +366,20 @@ d'achat de la réception.
 
 ### Exemple déroulé
 
-La cuisine a **100 kg de tomates** valorisés à **1,28 €/kg** (son PMP actuel).
-Elle reçoit **50 kg supplémentaires** à **1,50 €/kg** (prix réel facturé).
+La cuisine a **100 kg de tomates** valorisés à **800 FCFA/kg** (son PMP actuel).
+Elle reçoit **50 kg supplémentaires** à **950 FCFA/kg** (prix réel facturé).
 
 ```
-Nouveau PMP = (100 × 1,28)  +  (50 × 1,50)
-              ────────────────────────────
+Nouveau PMP = (100 × 800)  +  (50 × 950)
+              ───────────────────────────
                     100  +  50
 
-            =  128 + 75    =  203   =  1,35 €/kg
-               ─────────      ───
-                  150          150
+            =  80 000 + 47 500   =  127 500   =  850 FCFA/kg
+               ─────────────────     ───────
+                     150               150
 ```
 
-Le PMP passe de 1,28 à 1,35 €/kg : l'achat plus cher a tiré le coût moyen vers
+Le PMP passe de 800 à 850 FCFA/kg : l'achat plus cher a tiré le coût moyen vers
 le haut, mais il est **lissé** sur l'ensemble du stock — pas seulement sur les
 50 kg reçus.
 
@@ -251,7 +417,7 @@ deux avant de choisir le PMP. Voici la comparaison honnête.
 | **Suivi nécessaire** | Aucun suivi de lot | Date + prix de chaque réception, consommées dans l'ordre |
 | **Complexité technique** | Faible : une ligne `stocks` par (matière, site) | Élevée : table de lots, requête FIFO à chaque sortie |
 | **Cohérence avec le terrain** | Bonne pour les périssables (on ne trie pas ses tomates par date d'arrivée) | Meilleure pour les produits non périssables à longue durée (bouteilles millésimées, conserves vieillissantes) |
-| **Pilotage quotidien** | Simple : « ma tomate coûte 1,35 €/kg aujourd'hui » | Plus précis mais plus lourd à lire |
+| **Pilotage quotidien** | Simple : « ma tomate coûte 850 FCFA/kg aujourd'hui » | Plus précis mais plus lourd à lire |
 | **Dérive si stock négatif** | Le PMP reste stable (aucun recalcul sur sortie) | La file de lots peut se désynchroniser du stock réel |
 
 ### Pourquoi le PMP dans notre cas
@@ -307,6 +473,58 @@ sans permission — ce sont ses propres sites), pas la liste de gestion.
 > **stock** et son **PMP** sont propres à chaque cuisine. La liaison historique
 > utilisateur ↔ point de vente est **obsolète** : tout périmètre passe désormais
 > par le **site**.
+
+---
+
+## Utilisateurs, rôles & permissions
+
+### Règle d'or
+
+Un utilisateur reçoit des **rôles** ; un rôle porte des **permissions** au format
+`domaine.action` (ex. `reception.create`). **Les permissions sont définies dans le
+code** (`PermissionCatalog`), l'administrateur ne les **crée jamais** — il les
+**assigne** aux rôles. Deux garde-fous encadrent toute gestion d'utilisateur : la
+**hiérarchie anti-escalade** et le **périmètre de sites**.
+
+> **Pourquoi figer les permissions dans le code ?** Elles reflètent les capacités
+> réelles de l'application (des routes protégées). Laisser un admin en inventer
+> créerait des permissions sans effet, ou des trous de sécurité. Le code est la
+> source de vérité ; l'admin compose des rôles à partir de cette liste.
+
+### Hiérarchie anti-escalade
+
+Chaque rôle système porte un **niveau** ; on ne peut ni gérer un utilisateur, ni
+assigner un rôle, de niveau **supérieur ou égal** au sien.
+
+| Rôle | Niveau |
+|---|---|
+| `super-admin` | 100 |
+| `gerant` | 50 |
+| `chef-cuisine` / `econome` | 30 |
+| `caissier` | 20 |
+| `serveur` | 10 |
+
+- **Gérer** un utilisateur (éditer, désactiver, reset mdp) exige que sa cible soit
+  de niveau **strictement inférieur** au sien (`niveauMax()` = le plus haut de ses
+  rôles).
+- **Assigner** un rôle exige que ce rôle soit de niveau strictement inférieur au
+  sien : un gérant ne peut pas créer un autre gérant ni un super-admin.
+
+> **Pourquoi ?** Sans cette règle, un compte compromis ou un gérant zélé pourrait
+> s'octroyer (ou octroyer) des droits au-dessus de lui — une **escalade de
+> privilèges**. Le niveau matérialise « je ne crée que plus petit que moi ».
+
+### Périmètre de sites
+
+Un non-super-admin ne **rattache** et ne **gère** des utilisateurs que dans **ses
+propres sites** (pivot `user_site`). Rattacher à un site hors périmètre est refusé.
+
+### Le super-admin court-circuite tout
+
+Le `super-admin` **ignore** hiérarchie **et** périmètre (il gère tout, sur tous les
+sites — pas de rattachement `user_site`). En contrepartie, un garde-fou empêche de
+**supprimer ou désactiver le dernier super-admin actif** (anti lock-out : il doit
+toujours rester au moins un accès total au système).
 
 ---
 
@@ -504,3 +722,72 @@ Toutes les annulations (ligne ou commande entière) sont **journalisées** dans 
 table polymorphe `annulations` (avec motif obligatoire). Annuler une **commande
 entière** n'est possible qu'avant le service (ouverte / envoyée en cuisine) et
 libère la table.
+
+---
+
+## Machines à états — mémo transversal
+
+> Récapitulatif des cycles de vie. Le détail (garde-fous, permissions) est dans
+> les sections dédiées ; ici on voit d'un coup d'œil **où va chaque document** et
+> **quand le stock bouge**.
+
+| Document | Cycle de vie | Écriture verrouillée à | Stock ? |
+|---|---|---|---|
+| **Commande fournisseur** | `brouillon → envoyee → partiellement_recue → cloturee` (`annulee` sauf depuis `cloturee`) | modifiable **uniquement** en `brouillon` | jamais |
+| **Réception** | confirmée en une fois ; pilote le passage `partiellement_recue` / `cloturee` de la commande | — | **entrée** (+ dépense) |
+| **Commande client** | `ouverte → envoyee_en_cuisine → servie → encaissee` (`annulee` avant service) | immuable après `encaissee` | **sortie** au passage `servie` |
+| **Session de caisse** | `ouverte → fermee` | une seule `ouverte` par caisse | — |
+| **Carte** | `brouillon → active → archivee` | une seule `active` par PDV ; sur une carte `active` on **désactive** une ligne, on ne la supprime pas | — |
+| **Fiche technique** | `active → archivee` (versioning : jamais modifiée en place, v+1) | une archive est immuable | — |
+| **Inventaire** | `en_cours → cloture` | figé à la clôture | **correction** à la clôture |
+| **Table de salle** | `libre / occupee / reservee / a_debarrasser` | — | — |
+
+Les **types de mouvement de stock** (`mouvements_stock.type`) tracent l'origine de
+chaque écriture : `entree_reception`, `sortie_vente`, `correction_inventaire`, et
+les sorties « fuites » `perte` / `casse` / `offert` / `repas_personnel`. Tout
+passe par le `StockService` (cf. « Qui a le droit d'écrire le stock »).
+
+---
+
+## Pilotage / Reporting : lecture seule, adossé au « vendu »
+
+### Règle d'or
+
+Le module Reporting **ne modifie jamais** aucune donnée : il **agrège** ce que les
+autres modules ont produit. Toute la lecture des ventes part d'une base commune :
+une commande client compte comme **vendue** dès le statut `servie` (et le reste une
+fois `encaissee`) — **l'encaissement ne change pas la base**. Date de référence =
+`commandes_client.date_heure`.
+
+> **Pourquoi « servie » et pas « encaissée » ?** La vente est réelle dès que le
+> plat est produit et servi (c'est aussi là que le stock est déchargé). Attendre
+> l'encaissement décalerait le CA et le food cost d'une étape purement financière.
+
+### Food cost : théorique vs réel
+
+C'est le cœur du pilotage de marge. Pour chaque ligne vendue **dotée d'une fiche
+figée** :
+
+| Mesure | Calcul | Sens |
+|---|---|---|
+| **Coût théorique** | `fiche.cout_matiere × quantité vendue` | ce que la recette **devrait** coûter (coût de référence figé) |
+| **Coût réel** | `Σ (quantité × pmp_au_moment)` des mouvements `sortie_vente` de la ligne | ce que le stock a **réellement** coûté à la sortie |
+| **Écart (fuite)** | réel − théorique | sur-consommation, pertes, portions non maîtrisées |
+
+- **CA valorisé** = uniquement les lignes avec **fiche figée**. Les lignes vendues
+  **sans** fiche (produit non fiché au moment de la vente) sont **isolées** dans un
+  bloc `lignes_non_valorisees`, **exclues des ratios**, et leur part de CA est
+  signalée (`part_ca_non_valorise_pct`) — un signal de paramétrage à combler, pas
+  un chiffre faussé en silence.
+
+### Périmètre du reporting
+
+- **`reporting.global`** (ou super-admin) → **tous les sites** (aucun filtre).
+- Sinon → agrégations **restreintes aux sites de l'utilisateur** ; demander un
+  `site_id` hors de son périmètre renvoie **403**.
+- Permissions **par famille** : `reporting.ventes`, `reporting.food_cost`,
+  `reporting.stock`, `reporting.budget`, `reporting.dashboard`, plus
+  `reporting.global` (accès multi-site transversal).
+
+Rapports disponibles : **ventes**, **food cost**, **stock**, **budget**, et un
+**tableau de bord** de synthèse transversale.

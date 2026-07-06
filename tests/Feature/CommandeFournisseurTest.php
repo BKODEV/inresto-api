@@ -44,30 +44,24 @@ function actingAsCommandeUser(array $permissions = []): User
     return $user;
 }
 
-/** Données d'une ligne valide (matière + unité actives). */
-function ligneValide(array $surcharge = []): array
-{
-    return array_merge([
-        'matiere_premiere_id' => MatierePremiere::factory()->create()->id,
-        'unite_id' => UniteDeMesure::factory()->create()->id,
-        'quantite_commandee' => 10,
-        'prix_unitaire_previsionnel' => 2.5,
-    ], $surcharge);
-}
-
 /**
- * Ligne valide dont la matière est INSCRITE au catalogue du fournisseur — requis
- * par la validation API (on ne commande qu'au catalogue du fournisseur).
+ * Ligne valide : matière active INSCRITE au catalogue du fournisseur (on ne
+ * commande qu'au catalogue). L'unité de ligne est imposée par le catalogue côté
+ * serveur — elle n'est donc PAS dans le payload.
  */
 function ligneAuCatalogue(Fournisseur $fournisseur, array $surcharge = []): array
 {
     $matiereId = $surcharge['matiere_premiere_id'] ?? MatierePremiere::factory()->create()->id;
+
     CatalogueFournisseur::factory()->create([
         'fournisseur_id' => $fournisseur->id,
         'matiere_premiere_id' => $matiereId,
     ]);
 
-    return ligneValide(array_merge($surcharge, ['matiere_premiere_id' => $matiereId]));
+    return array_merge([
+        'quantite_commandee' => 10,
+        'prix_unitaire_previsionnel' => 2.5,
+    ], $surcharge, ['matiere_premiere_id' => $matiereId]);
 }
 
 // ───────────────────────── enum / machine à états ─────────────────────────
@@ -106,8 +100,8 @@ it('crée une commande avec ses lignes et calcule le montant prévisionnel', fun
     $commande = $this->service->creer(
         ['fournisseur_id' => $fournisseur->id],
         [
-            ligneValide(['quantite_commandee' => 10, 'prix_unitaire_previsionnel' => 2.5]),  // 25
-            ligneValide(['quantite_commandee' => 4, 'prix_unitaire_previsionnel' => 5]),      // 20
+            ligneAuCatalogue($fournisseur, ['quantite_commandee' => 10, 'prix_unitaire_previsionnel' => 2.5]),  // 25
+            ligneAuCatalogue($fournisseur, ['quantite_commandee' => 4, 'prix_unitaire_previsionnel' => 5]),      // 20
         ],
         $userId,
     );
@@ -119,9 +113,10 @@ it('crée une commande avec ses lignes et calcule le montant prévisionnel', fun
 
 it('recalcule le montant à l\'ajout, la mise à jour et la suppression de ligne', function () {
     $userId = User::factory()->create()->id;
-    $commande = $this->service->creer(['fournisseur_id' => Fournisseur::factory()->create()->id], [], $userId);
+    $fournisseur = Fournisseur::factory()->create();
+    $commande = $this->service->creer(['fournisseur_id' => $fournisseur->id], [], $userId);
 
-    $ligne = $this->service->ajouterLigne($commande, ligneValide(['quantite_commandee' => 3, 'prix_unitaire_previsionnel' => 10])); // 30
+    $ligne = $this->service->ajouterLigne($commande, ligneAuCatalogue($fournisseur, ['quantite_commandee' => 3, 'prix_unitaire_previsionnel' => 10])); // 30
     expect((float) $commande->fresh()->montant_previsionnel)->toBe(30.0);
 
     $this->service->mettreAJourLigne($ligne, ['quantite_commandee' => 5]); // 50
@@ -136,17 +131,48 @@ it('refuse une ligne dont la matière première est inactive', function () {
     $commande = $this->service->creer(['fournisseur_id' => Fournisseur::factory()->create()->id], [], $userId);
     $matiereInactive = MatierePremiere::factory()->inactif()->create();
 
-    $this->service->ajouterLigne($commande, ligneValide(['matiere_premiere_id' => $matiereInactive->id]));
+    // Matière inactive : rejetée avant même le lookup catalogue de l'unité.
+    $this->service->ajouterLigne($commande, [
+        'matiere_premiere_id' => $matiereInactive->id,
+        'quantite_commandee' => 10,
+        'prix_unitaire_previsionnel' => 2.5,
+    ]);
 })->throws(CommandeFournisseurException::class);
+
+it('estampe l\'unité d\'achat du catalogue sur la ligne, en ignorant tout payload', function () {
+    $userId = User::factory()->create()->id;
+    $fournisseur = Fournisseur::factory()->create();
+    $uniteAchat = UniteDeMesure::factory()->create(['symbole' => 'cagette']);
+    $matiere = MatierePremiere::factory()->create();
+    CatalogueFournisseur::factory()->create([
+        'fournisseur_id' => $fournisseur->id,
+        'matiere_premiere_id' => $matiere->id,
+        'unite_achat_id' => $uniteAchat->id,
+    ]);
+
+    $commande = $this->service->creer(
+        ['fournisseur_id' => $fournisseur->id],
+        [[
+            'matiere_premiere_id' => $matiere->id,
+            // Aucune unité fournie : le serveur doit poser celle du catalogue.
+            'quantite_commandee' => 10,
+            'prix_unitaire_previsionnel' => 2.5,
+        ]],
+        $userId,
+    );
+
+    expect((int) $commande->lignes->first()->unite_id)->toBe($uniteAchat->id);
+});
 
 // ───────────────────────── verrouillage hors brouillon ─────────────────────────
 
 it('interdit toute modification hors du statut brouillon', function () {
     $userId = User::factory()->create()->id;
-    $commande = $this->service->creer(['fournisseur_id' => Fournisseur::factory()->create()->id], [ligneValide()], $userId);
+    $fournisseur = Fournisseur::factory()->create();
+    $commande = $this->service->creer(['fournisseur_id' => $fournisseur->id], [ligneAuCatalogue($fournisseur)], $userId);
     $this->service->marquerEnvoyee($commande);
 
-    expect(fn () => $this->service->ajouterLigne($commande, ligneValide()))
+    expect(fn () => $this->service->ajouterLigne($commande, ligneAuCatalogue($fournisseur)))
         ->toThrow(CommandeFournisseurException::class)
         ->and(fn () => $this->service->mettreAJourEntete($commande, ['notes' => 'x']))
         ->toThrow(CommandeFournisseurException::class);
@@ -156,7 +182,8 @@ it('interdit toute modification hors du statut brouillon', function () {
 
 it('passe une commande de brouillon à envoyee', function () {
     $userId = User::factory()->create()->id;
-    $commande = $this->service->creer(['fournisseur_id' => Fournisseur::factory()->create()->id], [ligneValide()], $userId);
+    $fournisseur = Fournisseur::factory()->create();
+    $commande = $this->service->creer(['fournisseur_id' => $fournisseur->id], [ligneAuCatalogue($fournisseur)], $userId);
 
     $this->service->marquerEnvoyee($commande);
 
@@ -172,7 +199,8 @@ it('refuse d\'envoyer une commande sans ligne', function () {
 
 it('refuse une transition invalide', function () {
     $userId = User::factory()->create()->id;
-    $commande = $this->service->creer(['fournisseur_id' => Fournisseur::factory()->create()->id], [ligneValide()], $userId);
+    $fournisseur = Fournisseur::factory()->create();
+    $commande = $this->service->creer(['fournisseur_id' => $fournisseur->id], [ligneAuCatalogue($fournisseur)], $userId);
 
     // brouillon -> cloturee n'est pas autorisé
     $this->service->marquerCloturee($commande);
@@ -180,7 +208,8 @@ it('refuse une transition invalide', function () {
 
 it('annule une commande en brouillon mais pas une commande cloturee', function () {
     $userId = User::factory()->create()->id;
-    $commande = $this->service->creer(['fournisseur_id' => Fournisseur::factory()->create()->id], [ligneValide()], $userId);
+    $fournisseur = Fournisseur::factory()->create();
+    $commande = $this->service->creer(['fournisseur_id' => $fournisseur->id], [ligneAuCatalogue($fournisseur)], $userId);
 
     $this->service->annuler($commande);
     expect($commande->fresh()->statut)->toBe(StatutCommandeFournisseur::Annulee);
@@ -225,7 +254,11 @@ it('refuse à la création une matière hors du catalogue du fournisseur (422)',
 
     postJson('/api/commandes-fournisseur', [
         'fournisseur_id' => $fournisseur->id,
-        'lignes' => [ligneValide(['matiere_premiere_id' => $horsCatalogue->id])],
+        'lignes' => [[
+            'matiere_premiere_id' => $horsCatalogue->id,
+            'quantite_commandee' => 10,
+            'prix_unitaire_previsionnel' => 2.5,
+        ]],
     ])
         ->assertUnprocessable()
         ->assertJsonValidationErrors('lignes.0.matiere_premiere_id');
@@ -243,9 +276,11 @@ it('refuse l\'ajout d\'une ligne hors du catalogue du fournisseur (422)', functi
     );
     $horsCatalogue = MatierePremiere::factory()->create();
 
-    postJson("/api/commandes-fournisseur/{$commande->id}/lignes", ligneValide([
+    postJson("/api/commandes-fournisseur/{$commande->id}/lignes", [
         'matiere_premiere_id' => $horsCatalogue->id,
-    ]))
+        'quantite_commandee' => 10,
+        'prix_unitaire_previsionnel' => 2.5,
+    ])
         ->assertUnprocessable()
         ->assertJsonValidationErrors('matiere_premiere_id');
 
@@ -269,9 +304,10 @@ it('accepte l\'ajout d\'une ligne présente au catalogue du fournisseur', functi
 
 it('envoie une commande via l\'API', function () {
     actingAsCommandeUser(['commande-fournisseur.create', 'commande-fournisseur.update']);
+    $fournisseur = Fournisseur::factory()->create();
     $commande = app(CommandeFournisseurService::class)->creer(
-        ['fournisseur_id' => Fournisseur::factory()->create()->id],
-        [ligneValide()],
+        ['fournisseur_id' => $fournisseur->id],
+        [ligneAuCatalogue($fournisseur)],
         User::factory()->create()->id,
     );
 
@@ -292,9 +328,11 @@ it('rejette la modification d\'une commande envoyée via l\'API', function () {
 it('valide les quantités et prix des lignes à la création', function () {
     actingAsCommandeUser(['commande-fournisseur.create']);
 
+    $fournisseur = Fournisseur::factory()->create();
+
     postJson('/api/commandes-fournisseur', [
-        'fournisseur_id' => Fournisseur::factory()->create()->id,
-        'lignes' => [ligneValide(['quantite_commandee' => 0])],
+        'fournisseur_id' => $fournisseur->id,
+        'lignes' => [ligneAuCatalogue($fournisseur, ['quantite_commandee' => 0])],
     ])
         ->assertUnprocessable()
         ->assertJsonValidationErrors('lignes.0.quantite_commandee');

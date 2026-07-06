@@ -100,7 +100,8 @@ class ReceptionService
         $quantiteRecue = (float) $donnees['quantite_recue'];
         $prixUnitaireReel = (float) $donnees['prix_unitaire_reel'];
 
-        $facteur = $this->facteurConversion($reception->commande->fournisseur_id, $matierePremiereId);
+        $catalogue = $this->ligneCatalogue($reception->commande->fournisseur_id, $matierePremiereId);
+        $facteur = (float) $catalogue->qte_par_unite_achat;
 
         // Seule conversion du système : unité d'achat -> unité de stockage.
         $quantiteStockage = $quantiteRecue * $facteur;
@@ -108,7 +109,9 @@ class ReceptionService
 
         $ligne = $reception->lignes()->create([
             'matiere_premiere_id' => $matierePremiereId,
-            'unite_id' => (int) $donnees['unite_id'],
+            // Unité imposée par le catalogue (unité d'achat) : c'est elle qui
+            // porte le facteur de conversion du PMP. Jamais choisie par le client.
+            'unite_id' => (int) $catalogue->unite_achat_id,
             'quantite_recue' => $quantiteRecue,
             'prix_unitaire_reel' => $prixUnitaireReel,
         ]);
@@ -138,23 +141,24 @@ class ReceptionService
     }
 
     /**
-     * Facteur `qte_par_unite_achat` du couple (fournisseur de la commande,
-     * matière). Absent => le catalogue doit être renseigné d'abord.
+     * Ligne catalogue du couple (fournisseur de la commande, matière) : porte
+     * l'unité d'achat ET le facteur `qte_par_unite_achat` du PMP. Absente => le
+     * catalogue doit être renseigné d'abord.
      *
      * @throws ReceptionException
      */
-    private function facteurConversion(int $fournisseurId, int $matierePremiereId): float
+    private function ligneCatalogue(int $fournisseurId, int $matierePremiereId): CatalogueFournisseur
     {
-        $facteur = CatalogueFournisseur::query()
+        $ligne = CatalogueFournisseur::query()
             ->where('fournisseur_id', $fournisseurId)
             ->where('matiere_premiere_id', $matierePremiereId)
-            ->value('qte_par_unite_achat');
+            ->first(['unite_achat_id', 'qte_par_unite_achat']);
 
-        if ($facteur === null) {
+        if ($ligne === null) {
             throw ReceptionException::facteurConversionManquant($fournisseurId, $matierePremiereId);
         }
 
-        return (float) $facteur;
+        return $ligne;
     }
 
     /**

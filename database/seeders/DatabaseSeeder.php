@@ -17,11 +17,19 @@ class DatabaseSeeder extends Seeder
         // site PRINCIPAL, qui doit donc déjà exister.
         // RoleSeeder après PermissionSeeder (assigne des permissions existantes)
         // et avant SuperAdminSeeder (le super-admin reçoit le rôle système).
+        // Les seeders de nomenclature (catégories, unités) posent les référentiels
+        // usuels d'un restaurant pour démarrer sur des données réelles.
         $this->call([
             PermissionSeeder::class,
             RoleSeeder::class,
             SiteSeeder::class,
             SuperAdminSeeder::class,
+            CategorieProduitSeeder::class,
+            CategorieMatierePremiereSeeder::class,
+            UniteDeMesureSeeder::class,
+            // MatierePremiereSeeder après ses référentiels (catégories + unités).
+            MatierePremiereSeeder::class,
+            FournisseurSeeder::class,
         ]);
     }
 }

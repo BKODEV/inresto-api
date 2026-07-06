@@ -8,6 +8,7 @@ use App\Enums\StatutFicheTechnique;
 use App\Exceptions\FicheTechniqueException;
 use App\Models\CatalogueFournisseur;
 use App\Models\FicheTechnique;
+use App\Models\MatierePremiere;
 use App\Models\SousRecette;
 use Illuminate\Support\Facades\DB;
 
@@ -123,10 +124,18 @@ class FicheTechniqueService
         $fiche->updated_by = $userId;
         $fiche->save();
 
+        $uniteStockageParMatiere = MatierePremiere::query()
+            ->whereIn('id', collect($data['lignes_matieres'] ?? [])->pluck('matiere_premiere_id'))
+            ->pluck('unite_de_mesure_id', 'id');
+
         foreach ($data['lignes_matieres'] ?? [] as $ligne) {
             $fiche->lignesMatiere()->create([
                 'matiere_premiere_id' => $ligne['matiere_premiere_id'],
-                'unite_id' => $ligne['unite_id'],
+                // L'unité d'une ligne est TOUJOURS l'unité de stockage de la
+                // matière : coût et déstockage n'appliquent aucune conversion
+                // dimensionnelle. On l'estampe côté serveur, jamais depuis le
+                // client, pour garantir la cohérence.
+                'unite_id' => $uniteStockageParMatiere[$ligne['matiere_premiere_id']],
                 'quantite' => $ligne['quantite'],
             ]);
         }

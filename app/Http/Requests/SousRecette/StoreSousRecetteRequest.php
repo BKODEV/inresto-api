@@ -37,11 +37,9 @@ class StoreSousRecetteRequest extends FormRequest
                 'distinct',
                 Rule::exists('matieres_premieres', 'id')->where('statut', 'actif'),
             ],
-            'lignes.*.unite_id' => [
-                'required',
-                'integer',
-                Rule::exists('unites_de_mesure', 'id')->where('statut', 'actif'),
-            ],
+            // Pas d'unité de ligne au contrat : elle est TOUJOURS l'unité de
+            // stockage de la matière, estampée côté serveur (aucune conversion
+            // dimensionnelle). NB : `unite_id` (entête) reste l'unité produite.
             'lignes.*.quantite' => ['required', 'numeric', 'gt:0'],
         ];
     }
