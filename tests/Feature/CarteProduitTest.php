@@ -126,6 +126,101 @@ it('place les nouveaux produits en fin de section (1 puis 2) sans ordre fourni',
         ->assertJsonPath('data.ordre', 2);
 });
 
+// ───────────────────────── ajout en lot ─────────────────────────
+
+it('ajoute plusieurs produits en une requête, chacun en fin de sa section', function () {
+    actingAsCarteUser(['carte_produit.create']);
+    $carte = Carte::factory()->create();
+    $entrees = CategorieProduit::factory()->create();
+    $plats = CategorieProduit::factory()->create();
+    $e1 = Produit::factory()->create(['categorie_id' => $entrees->id]);
+    $e2 = Produit::factory()->create(['categorie_id' => $entrees->id]);
+    $p1 = Produit::factory()->create(['categorie_id' => $plats->id]);
+
+    $data = postJson("/api/cartes/{$carte->id}/produits/lot", ['lignes' => [
+        ['produit_id' => $e1->id, 'prix_vente' => 2500],
+        ['produit_id' => $e2->id, 'prix_vente' => 3000],
+        ['produit_id' => $p1->id, 'prix_vente' => 6000],
+    ]])->assertCreated()->json('data');
+
+    expect($data)->toHaveCount(3);
+
+    $ordreParProduit = collect($data)->pluck('ordre', 'produit_id');
+
+    // Les deux entrées se suivent ; la section « Plats » repart à 1.
+    expect($ordreParProduit[$e1->id])->toBe(1)
+        ->and($ordreParProduit[$e2->id])->toBe(2)
+        ->and($ordreParProduit[$p1->id])->toBe(1);
+});
+
+it('poursuit la numérotation après les produits déjà sur la carte', function () {
+    actingAsCarteUser(['carte_produit.create']);
+    $carte = Carte::factory()->create();
+    $categorie = CategorieProduit::factory()->create();
+    $existant = Produit::factory()->create(['categorie_id' => $categorie->id]);
+    $nouveau = Produit::factory()->create(['categorie_id' => $categorie->id]);
+    CarteProduit::factory()->create(['carte_id' => $carte->id, 'produit_id' => $existant->id, 'ordre' => 1]);
+
+    postJson("/api/cartes/{$carte->id}/produits/lot", ['lignes' => [
+        ['produit_id' => $nouveau->id, 'prix_vente' => 4000],
+    ]])->assertCreated()->assertJsonPath('data.0.ordre', 2);
+});
+
+it('rejette tout le lot si un produit y figure deux fois (422)', function () {
+    // `unique` interroge l'etat d'avant la requete : sans `distinct`, le doublon
+    // interne passerait et creerait deux lignes pour le meme produit.
+    actingAsCarteUser(['carte_produit.create']);
+    $carte = Carte::factory()->create();
+    $produit = Produit::factory()->create();
+
+    postJson("/api/cartes/{$carte->id}/produits/lot", ['lignes' => [
+        ['produit_id' => $produit->id, 'prix_vente' => 2000],
+        ['produit_id' => $produit->id, 'prix_vente' => 2500],
+    ]])->assertUnprocessable()->assertJsonValidationErrors('lignes.0.produit_id');
+
+    expect(CarteProduit::where('carte_id', $carte->id)->count())->toBe(0);
+});
+
+it('rejette tout le lot si un seul produit est deja sur la carte (422)', function () {
+    // Tout ou rien : un ajout partiel laisserait l'utilisateur deviner ce qui
+    // est passe.
+    actingAsCarteUser(['carte_produit.create']);
+    $carte = Carte::factory()->create();
+    $deja = Produit::factory()->create();
+    $valide = Produit::factory()->create();
+    CarteProduit::factory()->create(['carte_id' => $carte->id, 'produit_id' => $deja->id]);
+
+    postJson("/api/cartes/{$carte->id}/produits/lot", ['lignes' => [
+        ['produit_id' => $valide->id, 'prix_vente' => 2000],
+        ['produit_id' => $deja->id, 'prix_vente' => 2500],
+    ]])->assertUnprocessable()->assertJsonValidationErrors('lignes.1.produit_id');
+
+    expect(CarteProduit::where('carte_id', $carte->id)->count())->toBe(1);
+});
+
+it('refuse un lot vide et un prix nul (422)', function () {
+    actingAsCarteUser(['carte_produit.create']);
+    $carte = Carte::factory()->create();
+    $produit = Produit::factory()->create();
+
+    postJson("/api/cartes/{$carte->id}/produits/lot", ['lignes' => []])
+        ->assertUnprocessable()->assertJsonValidationErrors('lignes');
+
+    postJson("/api/cartes/{$carte->id}/produits/lot", ['lignes' => [
+        ['produit_id' => $produit->id, 'prix_vente' => 0],
+    ]])->assertUnprocessable()->assertJsonValidationErrors('lignes.0.prix_vente');
+});
+
+it('refuse l\'ajout en lot sans la permission carte_produit.create (403)', function () {
+    actingAsCarteUser(['carte_produit.view']);
+    $carte = Carte::factory()->create();
+    $produit = Produit::factory()->create();
+
+    postJson("/api/cartes/{$carte->id}/produits/lot", ['lignes' => [
+        ['produit_id' => $produit->id, 'prix_vente' => 2000],
+    ]])->assertForbidden();
+});
+
 it('décale les voisins quand on insère un produit à un ordre déjà occupé', function () {
     actingAsCarteUser(['carte_produit.create']);
     $carte = Carte::factory()->create();

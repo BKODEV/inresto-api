@@ -9,6 +9,7 @@ use App\Helpers\ApiResponse;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Produit\StoreProduitRequest;
 use App\Http\Requests\Produit\UpdateProduitRequest;
+use App\Http\Requests\Produit\UploadPhotoProduitRequest;
 use App\Http\Resources\ProduitResource;
 use App\Models\Produit;
 use App\Services\ProduitService;
@@ -106,5 +107,28 @@ class ProduitController extends Controller
         $this->service->supprimer($produit);
 
         return ApiResponse::deleted('Produit supprimé.');
+    }
+
+    /**
+     * Envoie/écrase la photo du produit — celle affichée au client sur le menu
+     * public. Seule voie d'écriture du champ `photo`.
+     */
+    public function uploadPhoto(UploadPhotoProduitRequest $request, Produit $produit): JsonResponse
+    {
+        $produit = $this->service->enregistrerPhoto($produit, $request->file('photo'));
+
+        return ApiResponse::updated(new ProduitResource($produit), 'Photo mise à jour.');
+    }
+
+    /**
+     * Retire la photo du produit (fichier effacé, `photo` remis à null).
+     */
+    public function deletePhoto(Produit $produit): JsonResponse
+    {
+        $this->authorize('update', $produit);
+
+        $produit = $this->service->supprimerPhoto($produit);
+
+        return ApiResponse::updated(new ProduitResource($produit), 'Photo supprimée.');
     }
 }

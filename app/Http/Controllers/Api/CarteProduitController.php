@@ -8,6 +8,7 @@ use App\Enums\CarteStatut;
 use App\Exceptions\CarteProduitException;
 use App\Helpers\ApiResponse;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\CarteProduit\StoreCarteProduitLotRequest;
 use App\Http\Requests\CarteProduit\StoreCarteProduitRequest;
 use App\Http\Requests\CarteProduit\UpdateCarteProduitRequest;
 use App\Http\Resources\CarteProduitResource;
@@ -68,6 +69,58 @@ class CarteProduitController extends Controller
         return ApiResponse::created(
             new CarteProduitResource($ligne->load('produit.categorie')),
             'Produit ajouté à la carte.'
+        );
+    }
+
+    /**
+     * Ajoute plusieurs produits d'un coup — composer une carte de trente plats
+     * un par un est impraticable.
+     *
+     * Tout ou rien : un seul produit en défaut (inactif, déjà sur la carte,
+     * doublon dans la requête) fait échouer le lot entier en 422. Un ajout
+     * partiel laisserait l'utilisateur deviner ce qui est passé.
+     *
+     * Chaque ligne se pose en fin de la section de sa catégorie, dans l'ordre
+     * reçu : le lot respecte donc l'ordre d'affichage choisi à l'écran.
+     */
+    public function storeLot(StoreCarteProduitLotRequest $request, Carte $carte, OrdreService $ordreService): JsonResponse
+    {
+        $lignesDemandees = $request->validated()['lignes'];
+
+        $ids = DB::transaction(function () use ($carte, $lignesDemandees, $ordreService): array {
+            $produits = Produit::query()
+                ->whereIn('id', array_column($lignesDemandees, 'produit_id'))
+                ->get()
+                ->keyBy('id');
+
+            $ids = [];
+            foreach ($lignesDemandees as $ligne) {
+                $produit = $produits[$ligne['produit_id']];
+
+                $ids[] = CarteProduit::create([
+                    'carte_id' => $carte->id,
+                    ...$ligne,
+                    // Recalculé à chaque itération : les lignes précédentes du lot
+                    // ont déjà décalé le maximum de leur section.
+                    'ordre' => $ordreService->placer(
+                        fn (): Builder => $this->sectionDeProduit($carte->id, $produit->categorie_id),
+                        null,
+                    ),
+                ])->id;
+            }
+
+            return $ids;
+        });
+
+        $creees = CarteProduit::query()
+            ->whereIn('id', $ids)
+            ->with('produit.categorie')
+            ->orderBy('ordre')
+            ->get();
+
+        return ApiResponse::created(
+            CarteProduitResource::collection($creees),
+            $creees->count().' produit(s) ajouté(s) à la carte.'
         );
     }
 

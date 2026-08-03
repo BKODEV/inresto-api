@@ -27,7 +27,8 @@ class StoreProduitRequest extends FormRequest
             'libelle' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'est_menu' => ['sometimes', 'boolean'],
-            'photo' => ['nullable', 'string', 'max:255'],
+            // `photo` est absent volontairement : elle s'écrit uniquement via
+            // POST /produits/{produit}/photo (le fichier vit sur le disque public).
             'allergenes' => ['nullable', 'string'],
             'statut' => ['sometimes', Rule::enum(Statut::class)],
         ];

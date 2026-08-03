@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Resources;
 
+use App\Support\MediaUrl;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -20,7 +21,11 @@ class ProduitResource extends JsonResource
             'libelle' => $this->libelle,
             'description' => $this->description,
             'est_menu' => $this->est_menu,
+            // `photo` est le chemin brut (utile au débogage) ; `photo_url` est la
+            // forme directement affichable, y compris pour les valeurs
+            // historiques saisies en URL absolue.
             'photo' => $this->photo,
+            'photo_url' => MediaUrl::pour($this->photo),
             'allergenes' => $this->allergenes,
             'statut' => $this->statut->value,
             'categorie' => new CategorieProduitResource($this->whenLoaded('categorie')),
