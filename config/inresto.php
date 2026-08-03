@@ -15,6 +15,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Menu public (QR code)
+    |--------------------------------------------------------------------------
+    |
+    | URL de base servant à construire le lien public du menu encodé dans les
+    | QR codes des tables (`{base}/menu/{public_token}`). Chaque instance a son
+    | propre domaine : rien n'est codé en dur. À défaut d'une valeur dédiée on
+    | retombe sur le front, la page menu étant servie par la même application.
+    */
+    'public_menu_base_url' => env('PUBLIC_MENU_BASE_URL', env('FRONTEND_URL', env('APP_URL', 'http://localhost'))),
+
+    /*
+    |--------------------------------------------------------------------------
     | Gestion du stock
     |--------------------------------------------------------------------------
     */

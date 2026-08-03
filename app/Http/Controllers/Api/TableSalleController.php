@@ -83,6 +83,23 @@ class TableSalleController extends Controller
     }
 
     /**
+     * Régénère le jeton public de la table : l'ancien lien et les QR déjà
+     * imprimés deviennent caducs. Réservé aux profils qui peuvent modifier la
+     * table (permission `table.update`).
+     */
+    public function regenererToken(TableSalle $table): JsonResponse
+    {
+        $this->authorize('update', $table);
+
+        $table = $this->service->regenererToken($table);
+
+        return ApiResponse::updated(
+            new TableSalleResource($table),
+            'Jeton public régénéré. Les anciens QR de cette table ne sont plus valides.'
+        );
+    }
+
+    /**
      * Changement manuel de statut (ex. marquer « à débarrasser »).
      */
     public function changerStatut(ChangerStatutRequest $request, TableSalle $table): JsonResponse

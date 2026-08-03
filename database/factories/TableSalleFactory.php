@@ -22,11 +22,20 @@ class TableSalleFactory extends Factory
             'numero' => (string) fake()->unique()->numberBetween(1, 9999),
             'capacite' => fake()->numberBetween(1, 12),
             'statut' => StatutTable::Libre->value,
+            'public_token' => TableSalle::genererPublicToken(),
         ];
     }
 
     public function occupee(): static
     {
         return $this->state(['statut' => StatutTable::Occupee->value]);
+    }
+
+    /**
+     * Table antérieure à l'introduction des QR : sert à exercer le backfill.
+     */
+    public function sansToken(): static
+    {
+        return $this->state(['public_token' => null]);
     }
 }

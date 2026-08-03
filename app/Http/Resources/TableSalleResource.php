@@ -20,6 +20,10 @@ class TableSalleResource extends JsonResource
             'numero' => $this->numero,
             'capacite' => $this->capacite,
             'statut' => $this->statut->value,
+            // Jeton + lien public du QR : destinés à l'ADMIN (affichage/impression
+            // du QR sur le plan de tables), pas au client final.
+            'public_token' => $this->public_token,
+            'menu_url' => $this->menuUrl(),
             'point_de_vente' => new PointDeVenteResource($this->whenLoaded('pointDeVente')),
         ];
     }
