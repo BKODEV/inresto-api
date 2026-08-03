@@ -136,7 +136,10 @@ class StockReportService
         $inventaires = DB::table('inventaires as inv')
             ->join('sites as si', 'si.id', '=', 'inv.site_id')
             ->where('inv.statut', 'cloture')
-            ->whereBetween('inv.date_inventaire', [$periode->debut->toDateString(), $periode->fin->toDateString()])
+            // Bornes en date-heure (et non en chaîne « Y-m-d ») : sur un moteur
+            // sans type date natif, la comparaison est lexicographique et
+            // « 2026-07-31 00:00:00 » > « 2026-07-31 » exclurait le dernier jour.
+            ->whereBetween('inv.date_inventaire', [$periode->debut->copy()->startOfDay(), $periode->fin->copy()->endOfDay()])
             ->when($siteIds !== null, fn (Builder $q) => $q->whereIn('inv.site_id', $siteIds))
             ->orderByDesc('inv.date_inventaire')
             ->selectRaw('inv.id, inv.site_id, si.nom as site, inv.date_inventaire')

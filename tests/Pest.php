@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Role;
+use App\Models\Site;
 use App\Models\User;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
@@ -90,6 +91,21 @@ function actingAsRole(string $role, array $siteIds = []): User
 function actingAsSuperAdmin(array $siteIds = []): User
 {
     return actingAsRole(Role::SUPER_ADMIN, $siteIds);
+}
+
+/**
+ * Rattache un utilisateur à des sites créés après son authentification.
+ *
+ * Le périmètre (`user_site`) borne toute lecture et toute écriture rattachée à
+ * un site : sans rattachement, les listes reviennent vides et les écritures
+ * sont refusées. La plupart des tests créant leurs sites après l'appel à
+ * `actingAs…`, ce raccourci évite d'en réordonner le corps.
+ */
+function rattacherAuxSites(User $user, Site ...$sites): User
+{
+    $user->sites()->syncWithoutDetaching(collect($sites)->pluck('id')->all());
+
+    return $user;
 }
 
 /**

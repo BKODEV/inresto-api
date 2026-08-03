@@ -81,7 +81,7 @@ class CommandeFournisseurController extends Controller
     {
         $this->authorize('view', $commande_fournisseur);
 
-        $commande_fournisseur->load(['fournisseur', 'lignes.matierePremiere', 'lignes.unite']);
+        $this->service->chargerRelations($commande_fournisseur);
 
         return ApiResponse::success(
             new CommandeFournisseurResource($commande_fournisseur),
@@ -128,7 +128,7 @@ class CommandeFournisseurController extends Controller
         $commande = $this->service->marquerEnvoyee($commande_fournisseur);
 
         return ApiResponse::updated(
-            new CommandeFournisseurResource($commande->load(['fournisseur', 'lignes.matierePremiere', 'lignes.unite'])),
+            new CommandeFournisseurResource($this->service->chargerRelations($commande)),
             'Commande fournisseur envoyée.'
         );
     }
@@ -143,7 +143,7 @@ class CommandeFournisseurController extends Controller
         $commande = $this->service->annuler($commande_fournisseur);
 
         return ApiResponse::updated(
-            new CommandeFournisseurResource($commande->load(['fournisseur', 'lignes.matierePremiere', 'lignes.unite'])),
+            new CommandeFournisseurResource($this->service->chargerRelations($commande)),
             'Commande fournisseur annulée.'
         );
     }

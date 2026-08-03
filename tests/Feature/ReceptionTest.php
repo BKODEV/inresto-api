@@ -474,10 +474,11 @@ function actingAsReceptionUser(array $permissions = []): User
 }
 
 it('crée puis confirme une réception via l\'API', function () {
-    actingAsReceptionUser(['reception.create', 'reception.update']);
+    $user = actingAsReceptionUser(['reception.create', 'reception.update']);
 
     $fournisseur = Fournisseur::factory()->create();
     $site = siteAvecBudget();
+    rattacherAuxSites($user, $site);
     ['matiere' => $matiere, 'unite' => $unite] = matiereCataloguee($fournisseur, facteur: 2);
     $commande = commandeEnvoyee($fournisseur, [[
         'matiere_premiere_id' => $matiere->id,
@@ -510,10 +511,11 @@ it('refuse la création d\'une réception sans authentification', function () {
 });
 
 it('refuse une réception sur une matière absente de la commande (API)', function () {
-    actingAsReceptionUser(['reception.create', 'reception.update']);
+    $user = actingAsReceptionUser(['reception.create', 'reception.update']);
 
     $fournisseur = Fournisseur::factory()->create();
     $site = siteAvecBudget();
+    rattacherAuxSites($user, $site);
     ['matiere' => $matiere, 'unite' => $unite] = matiereCataloguee($fournisseur);
     $autre = matiereCataloguee($fournisseur);
     $commande = commandeEnvoyee($fournisseur, [[
@@ -535,4 +537,56 @@ it('refuse une réception sur une matière absente de la commande (API)', functi
     ])
         ->assertUnprocessable()
         ->assertJsonValidationErrors('lignes.0.matiere_premiere_id');
+});
+
+// ───────────────────────── unicité de l'article ─────────────────────────
+
+it('refuse deux lignes sur le même article dans une réception (API)', function () {
+    $user = actingAsReceptionUser(['reception.create', 'reception.update']);
+
+    $fournisseur = Fournisseur::factory()->create();
+    $site = siteAvecBudget();
+    rattacherAuxSites($user, $site);
+    ['matiere' => $matiere, 'unite' => $unite] = matiereCataloguee($fournisseur);
+    $commande = commandeEnvoyee($fournisseur, [[
+        'matiere_premiere_id' => $matiere->id,
+        'unite_id' => $unite->id,
+        'quantite_commandee' => 10,
+        'prix_unitaire_previsionnel' => 4,
+    ]]);
+
+    $reception = Reception::factory()->create(['commande_fournisseur_id' => $commande->id, 'site_id' => $site->id]);
+
+    postJson("/api/receptions/{$reception->id}/confirmer", [
+        'lignes' => [
+            ['matiere_premiere_id' => $matiere->id, 'quantite_recue' => 4, 'prix_unitaire_reel' => 4],
+            ['matiere_premiere_id' => $matiere->id, 'quantite_recue' => 6, 'prix_unitaire_reel' => 4],
+        ],
+    ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('lignes.1.matiere_premiere_id');
+
+    expect(LigneReception::where('reception_id', $reception->id)->count())->toBe(0);
+});
+
+it('refuse au service un article en doublon, sans toucher au stock', function () {
+    $fournisseur = Fournisseur::factory()->create();
+    $site = siteAvecBudget();
+    ['matiere' => $matiere, 'unite' => $unite] = matiereCataloguee($fournisseur);
+    $commande = commandeEnvoyee($fournisseur, [[
+        'matiere_premiere_id' => $matiere->id,
+        'unite_id' => $unite->id,
+        'quantite_commandee' => 10,
+        'prix_unitaire_previsionnel' => 4,
+    ]]);
+
+    $reception = Reception::factory()->create(['commande_fournisseur_id' => $commande->id, 'site_id' => $site->id]);
+
+    expect(fn () => $this->service->confirmer($reception, [
+        ['matiere_premiere_id' => $matiere->id, 'quantite_recue' => 4, 'prix_unitaire_reel' => 4],
+        ['matiere_premiere_id' => $matiere->id, 'quantite_recue' => 6, 'prix_unitaire_reel' => 4],
+    ], $this->userId))->toThrow(ReceptionException::class);
+
+    expect(Stock::where('matiere_premiere_id', $matiere->id)->count())->toBe(0)
+        ->and(Depense::count())->toBe(0);
 });

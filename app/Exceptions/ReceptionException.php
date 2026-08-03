@@ -43,6 +43,14 @@ class ReceptionException extends RuntimeException
         );
     }
 
+    public static function matiereEnDoublon(int $matierePremiereId): self
+    {
+        return new self(
+            "L'article (id: {$matierePremiereId}) apparaît plusieurs fois dans la réception : cumulez les quantités sur une seule ligne.",
+            409,
+        );
+    }
+
     public static function dejaConfirmee(int $receptionId): self
     {
         return new self("La réception (id: {$receptionId}) est déjà confirmée.", 409);

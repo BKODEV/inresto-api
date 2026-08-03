@@ -16,6 +16,7 @@ use App\Models\LigneInventaire;
 use App\Models\MouvementStock;
 use App\Models\Stock;
 use App\Services\InventaireService;
+use App\Support\SitePerimetre;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -32,11 +33,16 @@ class InventaireController extends Controller
     {
         $this->authorize('viewAny', Inventaire::class);
 
+        $sites = SitePerimetre::resoudre(
+            $request->user(),
+            $request->filled('site_id') ? $request->integer('site_id') : null,
+        );
+
         $inventaires = Inventaire::query()
             ->with('site')
             ->when(
-                $request->filled('site_id'),
-                fn (Builder $query) => $query->where('site_id', $request->integer('site_id'))
+                $sites !== null,
+                fn (Builder $query) => $query->whereIn('site_id', $sites)
             )
             ->orderByDesc('date_inventaire')
             ->paginate($request->integer('per_page', 15));

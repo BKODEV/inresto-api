@@ -4,13 +4,17 @@ declare(strict_types=1);
 
 use App\Enums\StatutCommandeFournisseur;
 use App\Exceptions\CommandeFournisseurException;
+use App\Models\Budget;
 use App\Models\CatalogueFournisseur;
 use App\Models\CommandeFournisseur;
 use App\Models\Fournisseur;
 use App\Models\MatierePremiere;
+use App\Models\Reception;
+use App\Models\Site;
 use App\Models\UniteDeMesure;
 use App\Models\User;
 use App\Services\CommandeFournisseurService;
+use App\Services\ReceptionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
@@ -336,4 +340,156 @@ it('valide les quantités et prix des lignes à la création', function () {
     ])
         ->assertUnprocessable()
         ->assertJsonValidationErrors('lignes.0.quantite_commandee');
+});
+
+// ───────────────────────── unicité de l'article ─────────────────────────
+
+it('refuse deux fois le même article à la création (422)', function () {
+    actingAsCommandeUser(['commande-fournisseur.create']);
+    $fournisseur = Fournisseur::factory()->create();
+    $ligne = ligneAuCatalogue($fournisseur);
+
+    postJson('/api/commandes-fournisseur', [
+        'fournisseur_id' => $fournisseur->id,
+        'lignes' => [$ligne, $ligne],
+    ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('lignes.1.matiere_premiere_id');
+
+    expect(CommandeFournisseur::count())->toBe(0);
+});
+
+it('refuse l\'ajout d\'un article déjà présent dans la commande (422)', function () {
+    actingAsCommandeUser(['commande-fournisseur.update']);
+    $fournisseur = Fournisseur::factory()->create();
+    $ligne = ligneAuCatalogue($fournisseur);
+    $commande = app(CommandeFournisseurService::class)->creer(
+        ['fournisseur_id' => $fournisseur->id],
+        [$ligne],
+        User::factory()->create()->id,
+    );
+
+    postJson("/api/commandes-fournisseur/{$commande->id}/lignes", $ligne)
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('matiere_premiere_id');
+
+    expect($commande->fresh()->lignes)->toHaveCount(1);
+});
+
+it('refuse de basculer une ligne sur un article déjà commandé (422)', function () {
+    actingAsCommandeUser(['commande-fournisseur.update']);
+    $fournisseur = Fournisseur::factory()->create();
+    $premiere = ligneAuCatalogue($fournisseur);
+    $seconde = ligneAuCatalogue($fournisseur);
+    $commande = app(CommandeFournisseurService::class)->creer(
+        ['fournisseur_id' => $fournisseur->id],
+        [$premiere, $seconde],
+        User::factory()->create()->id,
+    );
+    $ligneSeconde = $commande->lignes->firstWhere('matiere_premiere_id', $seconde['matiere_premiere_id']);
+
+    putJson("/api/commandes-fournisseur/{$commande->id}/lignes/{$ligneSeconde->id}", [
+        'matiere_premiere_id' => $premiere['matiere_premiere_id'],
+    ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('matiere_premiere_id');
+
+    expect((int) $ligneSeconde->fresh()->matiere_premiere_id)->toBe($seconde['matiere_premiere_id']);
+});
+
+it('autorise la mise à jour d\'une ligne sur son propre article', function () {
+    actingAsCommandeUser(['commande-fournisseur.update']);
+    $fournisseur = Fournisseur::factory()->create();
+    $ligne = ligneAuCatalogue($fournisseur);
+    $commande = app(CommandeFournisseurService::class)->creer(
+        ['fournisseur_id' => $fournisseur->id],
+        [$ligne],
+        User::factory()->create()->id,
+    );
+
+    putJson("/api/commandes-fournisseur/{$commande->id}/lignes/{$commande->lignes->first()->id}", [
+        'matiere_premiere_id' => $ligne['matiere_premiere_id'],
+        'quantite_commandee' => 20,
+    ])->assertOk();
+
+    expect((float) $commande->fresh()->lignes->first()->quantite_commandee)->toBe(20.0);
+});
+
+it('refuse au service l\'ajout d\'un article déjà présent (garde-fou hors HTTP)', function () {
+    $userId = User::factory()->create()->id;
+    $fournisseur = Fournisseur::factory()->create();
+    $ligne = ligneAuCatalogue($fournisseur);
+    $commande = $this->service->creer(['fournisseur_id' => $fournisseur->id], [$ligne], $userId);
+
+    $this->service->ajouterLigne($commande, $ligne);
+})->throws(CommandeFournisseurException::class);
+
+// ───────────────────────── reste à recevoir ─────────────────────────
+
+it('expose le déjà-reçu et le reste à recevoir après une réception partielle', function () {
+    actingAsCommandeUser(['commande-fournisseur.view']);
+
+    $fournisseur = Fournisseur::factory()->create();
+    $ligne = ligneAuCatalogue($fournisseur, ['quantite_commandee' => 10]);
+    $service = app(CommandeFournisseurService::class);
+    $commande = $service->creer(['fournisseur_id' => $fournisseur->id], [$ligne], User::factory()->create()->id);
+    $service->marquerEnvoyee($commande);
+
+    // 4 reçus sur 10 commandés.
+    $site = Site::factory()->create();
+    Budget::factory()->create(['site_id' => $site->id, 'mois' => now()->startOfMonth()->toDateString()]);
+    $reception = Reception::factory()->create(['commande_fournisseur_id' => $commande->id, 'site_id' => $site->id]);
+    app(ReceptionService::class)->confirmer($reception, [[
+        'matiere_premiere_id' => $ligne['matiere_premiere_id'],
+        'quantite_recue' => 4,
+        'prix_unitaire_reel' => 2.5,
+    ]], User::factory()->create()->id);
+
+    $data = getJson("/api/commandes-fournisseur/{$commande->id}")->assertOk()->json('data.lignes.0');
+
+    expect((float) $data['quantite_recue'])->toBe(4.0)
+        ->and((float) $data['quantite_restante'])->toBe(6.0);
+});
+
+it('borne le reste à recevoir à zéro en cas de sur-livraison', function () {
+    actingAsCommandeUser(['commande-fournisseur.view']);
+
+    $fournisseur = Fournisseur::factory()->create();
+    $ligne = ligneAuCatalogue($fournisseur, ['quantite_commandee' => 10]);
+    $service = app(CommandeFournisseurService::class);
+    $commande = $service->creer(['fournisseur_id' => $fournisseur->id], [$ligne], User::factory()->create()->id);
+    $service->marquerEnvoyee($commande);
+
+    $site = Site::factory()->create();
+    Budget::factory()->create(['site_id' => $site->id, 'mois' => now()->startOfMonth()->toDateString()]);
+    $reception = Reception::factory()->create(['commande_fournisseur_id' => $commande->id, 'site_id' => $site->id]);
+    app(ReceptionService::class)->confirmer($reception, [[
+        'matiere_premiere_id' => $ligne['matiere_premiere_id'],
+        'quantite_recue' => 12, // sur-livraison acceptée
+        'prix_unitaire_reel' => 2.5,
+    ]], User::factory()->create()->id);
+
+    $data = getJson("/api/commandes-fournisseur/{$commande->id}")->assertOk()->json('data.lignes.0');
+
+    expect((float) $data['quantite_recue'])->toBe(12.0)
+        ->and((float) $data['quantite_restante'])->toBe(0.0);
+});
+
+it('renvoie le reste à recevoir sur une réponse de transition, pas seulement sur show', function () {
+    // Le drawer de réception est ouvert depuis la commande en mémoire, elle-même
+    // alimentée par la réponse d'« envoyer » : elle doit porter les mêmes champs.
+    actingAsCommandeUser(['commande-fournisseur.update']);
+
+    $fournisseur = Fournisseur::factory()->create();
+    $ligne = ligneAuCatalogue($fournisseur, ['quantite_commandee' => 10]);
+    $commande = app(CommandeFournisseurService::class)->creer(
+        ['fournisseur_id' => $fournisseur->id],
+        [$ligne],
+        User::factory()->create()->id,
+    );
+
+    postJson("/api/commandes-fournisseur/{$commande->id}/envoyer")
+        ->assertOk()
+        ->assertJsonPath('data.lignes.0.quantite_recue', 0)
+        ->assertJsonPath('data.lignes.0.quantite_restante', 10);
 });

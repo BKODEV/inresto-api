@@ -12,7 +12,6 @@ use App\Models\CatalogueFournisseur;
 use App\Models\CommandeFournisseur;
 use App\Models\Depense;
 use App\Models\LigneCommandeFournisseur;
-use App\Models\LigneReception;
 use App\Models\Reception;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -68,6 +67,8 @@ class ReceptionService
             throw ReceptionException::dejaConfirmee($reception->id);
         }
 
+        $this->assertMatieresUniques($lignes);
+
         return DB::transaction(function () use ($reception, $lignes, $userId, $commande): Reception {
             $budget = $this->budgetDuSite($reception);
             $reception->user_id = $userId;
@@ -84,6 +85,30 @@ class ReceptionService
 
             return $reception->load(['commande', 'site', 'lignes.matierePremiere', 'lignes.unite']);
         });
+    }
+
+    /**
+     * Une matière ne peut apparaître qu'une fois dans une réception : deux
+     * lignes créeraient deux mouvements de stock et deux dépenses pour la même
+     * livraison, faussant le PMP et l'imputation budgétaire.
+     *
+     * @param  array<int, array{matiere_premiere_id: int, quantite_recue: float|string, prix_unitaire_reel: float|string}>  $lignes
+     *
+     * @throws ReceptionException
+     */
+    private function assertMatieresUniques(array $lignes): void
+    {
+        $vues = [];
+
+        foreach ($lignes as $ligne) {
+            $matiereId = (int) $ligne['matiere_premiere_id'];
+
+            if (in_array($matiereId, $vues, true)) {
+                throw ReceptionException::matiereEnDoublon($matiereId);
+            }
+
+            $vues[] = $matiereId;
+        }
     }
 
     /**
@@ -193,13 +218,7 @@ class ReceptionService
      */
     private function synchroniserStatutCommande(CommandeFournisseur $commande): void
     {
-        $receptionIds = $commande->receptions()->pluck('id')->all();
-
-        $recuParMatiere = LigneReception::query()
-            ->whereIn('reception_id', $receptionIds)
-            ->selectRaw('matiere_premiere_id, SUM(quantite_recue) AS total')
-            ->groupBy('matiere_premiere_id')
-            ->pluck('total', 'matiere_premiere_id');
+        $recuParMatiere = $commande->quantitesRecuesParMatiere();
 
         $integrale = $commande->lignes->every(function (LigneCommandeFournisseur $ligne) use ($recuParMatiere): bool {
             $commandee = (float) $ligne->quantite_commandee;

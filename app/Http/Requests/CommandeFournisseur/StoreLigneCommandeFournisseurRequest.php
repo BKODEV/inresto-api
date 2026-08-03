@@ -26,11 +26,24 @@ class StoreLigneCommandeFournisseurRequest extends FormRequest
                 'required',
                 'integer',
                 Rule::exists('matieres_premieres', 'id')->where('statut', 'actif'),
+                // Une matière ne peut figurer qu'une fois par commande.
+                Rule::unique('lignes_commande_fournisseur', 'matiere_premiere_id')
+                    ->where('commande_fournisseur_id', $this->route('commande_fournisseur')->id),
                 new MatiereAuCatalogue($this->route('commande_fournisseur')->fournisseur_id),
             ],
             // Pas d'unité au contrat : imposée par le catalogue (unité d'achat).
             'quantite_commandee' => ['required', 'numeric', 'gt:0'],
             'prix_unitaire_previsionnel' => ['required', 'numeric', 'gt:0'],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'matiere_premiere_id.unique' => 'Cet article est déjà présent dans la commande : modifiez la quantité de la ligne existante.',
         ];
     }
 }

@@ -46,10 +46,49 @@ it('crée un utilisateur avec le mot de passe fourni', function () {
 
 it('refuse la création sans mot de passe ni email (422)', function () {
     actingAsSuperAdmin();
+    $site = Site::factory()->create();
 
     postJson('/api/users', [
         'nom' => 'Sans', 'prenom' => 'Mail', 'identifiant' => 'sansmail',
-    ])->assertStatus(422);
+        'sites' => [$site->id],
+    ])->assertStatus(422)->assertJsonValidationErrors(['email', 'password']);
+});
+
+it('refuse la création d\'un compte sans site (422)', function () {
+    actingAsSuperAdmin();
+
+    postJson('/api/users', [
+        'nom' => 'Sans', 'prenom' => 'Site', 'identifiant' => 'sanssite',
+        'password' => 'Password1', 'roles' => ['serveur'],
+    ])->assertStatus(422)->assertJsonValidationErrors(['sites']);
+
+    postJson('/api/users', [
+        'nom' => 'Sans', 'prenom' => 'Site', 'identifiant' => 'sanssite',
+        'password' => 'Password1', 'roles' => ['serveur'], 'sites' => [],
+    ])->assertStatus(422)->assertJsonValidationErrors(['sites']);
+
+    expect(User::where('identifiant', 'sanssite')->exists())->toBeFalse();
+});
+
+it('refuse de retirer le dernier site d\'un compte existant (422)', function () {
+    $site = Site::factory()->create();
+    actingAsSuperAdmin([$site->id]);
+    $serveur = userAvecRole('serveur', [$site->id]);
+
+    putJson("/api/users/{$serveur->id}", ['sites' => []])
+        ->assertStatus(422)->assertJsonValidationErrors(['sites']);
+
+    expect($serveur->fresh()->sites)->toHaveCount(1);
+});
+
+it('laisse le périmètre intact quand `sites` est absent de la modification', function () {
+    $site = Site::factory()->create();
+    actingAsSuperAdmin([$site->id]);
+    $serveur = userAvecRole('serveur', [$site->id]);
+
+    putJson("/api/users/{$serveur->id}", ['nom' => 'Renommé'])->assertOk();
+
+    expect($serveur->fresh()->sites->pluck('id')->all())->toBe([$site->id]);
 });
 
 it('génère un mot de passe et envoie un mail de bienvenue quand seul l\'email est fourni', function () {

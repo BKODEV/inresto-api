@@ -7,8 +7,8 @@ namespace App\Http\Controllers\Api\Reporting;
 use App\Http\Controllers\Controller;
 use App\Support\Periode;
 use App\Support\PeriodeResolver;
+use App\Support\SitePerimetre;
 use Illuminate\Http\Request;
-use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 /**
  * Base des controllers reporting : résolution de la période et du périmètre de
@@ -52,22 +52,12 @@ abstract class ReportingController extends Controller
     protected function siteScope(Request $request): ?array
     {
         $user = $request->user();
-        $estGlobal = $user->isSuperAdmin() || $user->can('reporting.global');
 
-        /** @var int[] $sitesUtilisateur */
-        $sitesUtilisateur = $user->sites()->pluck('sites.id')->all();
-
-        if ($request->filled('site_id')) {
-            $siteId = $request->integer('site_id');
-
-            if (! $estGlobal && ! in_array($siteId, $sitesUtilisateur, true)) {
-                throw new AccessDeniedHttpException('Site hors de votre périmètre.');
-            }
-
-            return [$siteId];
-        }
-
-        return $estGlobal ? null : $sitesUtilisateur;
+        return SitePerimetre::resoudre(
+            $user,
+            $request->filled('site_id') ? $request->integer('site_id') : null,
+            elargi: $user->can('reporting.global'),
+        );
     }
 
     protected function pointDeVenteId(Request $request): ?int

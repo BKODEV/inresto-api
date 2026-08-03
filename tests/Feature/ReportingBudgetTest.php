@@ -47,3 +47,19 @@ it('liste les dépenses détaillées ventilées par type', function () {
         ->and((float) $data['totaux_par_type']['charge_hors_stock'])->toBe(200.0)
         ->and((float) $data['total'])->toBe(500.0);
 });
+
+it('inclut les dépenses tombant sur le dernier jour de la période', function () {
+    actingAsReportingUser(['reporting.budget', 'reporting.global']);
+
+    $site = Site::factory()->create();
+    $budget = Budget::factory()->create(['site_id' => $site->id, 'mois' => '2026-03-01']);
+    Depense::factory()->create(['budget_id' => $budget->id, 'montant' => 150, 'date_depense' => '2026-03-31']);
+
+    // Borne haute = jour même de la dépense : elle doit être comptée (bornes incluses).
+    $data = getJson('/api/reporting/budget/depenses?periode=plage&date_debut=2026-03-01&date_fin=2026-03-31')
+        ->assertOk()
+        ->json('data');
+
+    expect($data['depenses'])->toHaveCount(1)
+        ->and((float) $data['total'])->toBe(150.0);
+});

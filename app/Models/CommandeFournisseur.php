@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Collection;
 
 /**
  * Commande fournisseur.
@@ -67,5 +68,25 @@ class CommandeFournisseur extends Model
     public function estModifiable(): bool
     {
         return $this->statut->estModifiable();
+    }
+
+    /**
+     * Cumul des quantités reçues par matière, toutes réceptions de la commande
+     * confondues et tous sites confondus (une commande peut être éclatée sur
+     * plusieurs sites via plusieurs réceptions).
+     *
+     * Les quantités sont exprimées en unité d'achat, comme les quantités
+     * commandées : les deux sont donc directement comparables.
+     *
+     * @return Collection<int, float> matiere_premiere_id => quantité reçue
+     */
+    public function quantitesRecuesParMatiere(): Collection
+    {
+        return LigneReception::query()
+            ->whereIn('reception_id', $this->receptions()->select('id'))
+            ->selectRaw('matiere_premiere_id, SUM(quantite_recue) AS total')
+            ->groupBy('matiere_premiere_id')
+            ->pluck('total', 'matiere_premiere_id')
+            ->map(fn ($total): float => (float) $total);
     }
 }

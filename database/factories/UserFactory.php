@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Models\Site;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
@@ -46,5 +47,20 @@ class UserFactory extends Factory
         return $this->state(fn (array $attributes) => [
             'email_verified_at' => null,
         ]);
+    }
+
+    /**
+     * Rattache l'utilisateur à un site (le crée si aucun n'est fourni).
+     *
+     * Le périmètre borne les lectures comme les écritures rattachées à un site :
+     * un utilisateur sans site ne voit rien et ne peut rien écrire. Cet état est
+     * donc le défaut attendu de tout test touchant stock, inventaire, réception
+     * ou budget.
+     */
+    public function avecSite(?Site $site = null): static
+    {
+        return $this->afterCreating(function (User $user) use ($site) {
+            $user->sites()->syncWithoutDetaching([($site ?? Site::factory()->create())->id]);
+        });
     }
 }

@@ -256,10 +256,12 @@ it('refuse une matière première en doublon dans la synchronisation', function 
 // ───────────────────────── budgets ─────────────────────────
 
 it('crée un budget pour le premier jour du mois', function () {
-    actingAsUserAvec(['budget.create']);
+    $user = actingAsUserAvec(['budget.create']);
+    $site = Site::factory()->create();
+    rattacherAuxSites($user, $site);
 
     postJson('/api/budgets', [
-        'site_id' => Site::factory()->create()->id,
+        'site_id' => $site->id,
         'mois' => '2026-06-01',
         'montant_alloue' => 15000,
     ])
@@ -293,8 +295,9 @@ it('refuse un budget en doublon pour un site et un mois', function () {
 });
 
 it('supprime un budget', function () {
-    actingAsUserAvec(['budget.delete']);
+    $user = actingAsUserAvec(['budget.delete']);
     $budget = Budget::factory()->create();
+    rattacherAuxSites($user, $budget->site);
 
     deleteJson("/api/budgets/{$budget->id}")->assertOk();
 

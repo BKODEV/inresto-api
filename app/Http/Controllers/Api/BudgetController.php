@@ -11,6 +11,7 @@ use App\Http\Requests\Budget\UpdateBudgetRequest;
 use App\Http\Resources\BudgetResource;
 use App\Models\Budget;
 use App\Models\Site;
+use App\Support\SitePerimetre;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -26,12 +27,17 @@ class BudgetController extends Controller
     {
         $this->authorize('viewAny', Budget::class);
 
+        $sites = SitePerimetre::resoudre(
+            $request->user(),
+            $request->filled('site_id') ? $request->integer('site_id') : null,
+        );
+
         $budgets = Budget::query()
             ->with('site')
             ->withSum('depenses', 'montant')
             ->when(
-                $request->filled('site_id'),
-                fn (Builder $query) => $query->where('site_id', $request->integer('site_id'))
+                $sites !== null,
+                fn (Builder $query) => $query->whereIn('site_id', $sites)
             )
             ->orderByDesc('mois')
             ->paginate($request->integer('per_page', 15));
@@ -109,6 +115,7 @@ class BudgetController extends Controller
     public function indexForSite(Request $request, Site $site): JsonResponse
     {
         $this->authorize('viewAny', Budget::class);
+        SitePerimetre::resoudre($request->user(), $site->id);
 
         $query = $site->budgets()
             ->withSum('depenses', 'montant')
@@ -141,6 +148,7 @@ class BudgetController extends Controller
     public function showForSiteMonth(Site $site, string $mois): JsonResponse
     {
         $this->authorize('viewAny', Budget::class);
+        SitePerimetre::resoudre(request()->user(), $site->id);
 
         $premierDuMois = Carbon::createFromFormat('Y-m-d', $mois.'-01')->startOfMonth();
 

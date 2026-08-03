@@ -89,3 +89,22 @@ it('ne remonte en alerte que les matières sous leur seuil', function () {
         ->and((float) $rows[0]['seuil'])->toBe(10.0)
         ->and((float) $rows[0]['manquant'])->toBe(6.0);
 });
+
+it('inclut les inventaires clôturés le dernier jour de la période', function () {
+    actingAsReportingUser(['reporting.stock', 'reporting.global']);
+
+    $site = Site::factory()->create();
+    $matiere = MatierePremiere::factory()->create();
+    Stock::factory()->create(['matiere_premiere_id' => $matiere->id, 'site_id' => $site->id, 'stock_courant' => 5, 'pmp' => 2]);
+
+    $inventaire = Inventaire::factory()->create(['site_id' => $site->id, 'statut' => 'cloture', 'date_inventaire' => '2026-03-31']);
+    LigneInventaire::factory()->create(['inventaire_id' => $inventaire->id, 'matiere_premiere_id' => $matiere->id, 'ecart' => -3]);
+
+    // Borne haute = jour même de l'inventaire : il doit être remonté (bornes incluses).
+    $rows = getJson('/api/reporting/stock/ecarts-inventaire?periode=plage&date_debut=2026-03-01&date_fin=2026-03-31')
+        ->assertOk()
+        ->json('data.inventaires');
+
+    expect($rows)->toHaveCount(1)
+        ->and((float) $rows[0]['ecart_total_valeur'])->toBe(-6.0);
+});

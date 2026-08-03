@@ -50,7 +50,7 @@ class CommandeFournisseurService
 
             $this->recalculerMontant($commande);
 
-            return $commande->load(['fournisseur', 'lignes.matierePremiere', 'lignes.unite']);
+            return $this->chargerRelations($commande);
         });
     }
 
@@ -68,7 +68,7 @@ class CommandeFournisseurService
         $commande->fill($donnees);
         $commande->save();
 
-        return $commande->load(['fournisseur', 'lignes.matierePremiere', 'lignes.unite']);
+        return $this->chargerRelations($commande);
     }
 
     /**
@@ -105,6 +105,7 @@ class CommandeFournisseurService
         return DB::transaction(function () use ($ligne, $donnees, $commande): LigneCommandeFournisseur {
             $matiereId = (int) ($donnees['matiere_premiere_id'] ?? $ligne->matiere_premiere_id);
             $this->assertMatiereActive($matiereId);
+            $this->assertMatiereAbsente($commande, $matiereId, $ligne->id);
 
             $donnees['matiere_premiere_id'] = $matiereId;
             // L'unité suit TOUJOURS le catalogue (unité d'achat), jamais le payload.
@@ -133,6 +134,32 @@ class CommandeFournisseurService
             $ligne->delete();
             $this->recalculerMontant($commande);
         });
+    }
+
+    /**
+     * Charge les relations exposées par l'API et calcule, pour chaque ligne, ce
+     * qui a DÉJÀ été reçu et ce qu'il RESTE à recevoir (en unité d'achat).
+     *
+     * Ces deux valeurs sont dérivées des réceptions, jamais stockées. Elles
+     * alimentent le pré-remplissage du formulaire de réception : sans elles,
+     * une seconde livraison partielle reproposerait la quantité commandée
+     * entière et provoquerait une sur-réception.
+     */
+    public function chargerRelations(CommandeFournisseur $commande): CommandeFournisseur
+    {
+        $commande->load(['fournisseur', 'lignes.matierePremiere', 'lignes.unite']);
+
+        $recuParMatiere = $commande->quantitesRecuesParMatiere();
+
+        foreach ($commande->lignes as $ligne) {
+            $recu = (float) ($recuParMatiere[$ligne->matiere_premiere_id] ?? 0);
+
+            $ligne->quantite_recue = round($recu, 3);
+            // Bornée à 0 : une sur-livraison ne crée pas de « reste » négatif.
+            $ligne->quantite_restante = round(max((float) $ligne->quantite_commandee - $recu, 0), 3);
+        }
+
+        return $commande;
     }
 
     /**
@@ -229,6 +256,7 @@ class CommandeFournisseurService
     {
         $matiereId = (int) $donnees['matiere_premiere_id'];
         $this->assertMatiereActive($matiereId);
+        $this->assertMatiereAbsente($commande, $matiereId);
 
         return $commande->lignes()->create([
             'matiere_premiere_id' => $matiereId,
@@ -276,6 +304,27 @@ class CommandeFournisseurService
         $matiere = MatierePremiere::find($matierePremiereId);
         if ($matiere === null || ! $matiere->isActif()) {
             throw CommandeFournisseurException::matiereInactive($matierePremiereId);
+        }
+    }
+
+    /**
+     * Une matière ne figure qu'une seule fois par commande : deux lignes sur la
+     * même matière rendraient ambigu le cumul commandé/reçu qui pilote la
+     * clôture de la commande. Doublé par un index unique en base.
+     *
+     * @param  int|null  $ligneExclueId  Ligne en cours de modification, exclue du contrôle.
+     *
+     * @throws CommandeFournisseurException
+     */
+    private function assertMatiereAbsente(CommandeFournisseur $commande, int $matierePremiereId, ?int $ligneExclueId = null): void
+    {
+        $existe = $commande->lignes()
+            ->where('matiere_premiere_id', $matierePremiereId)
+            ->when($ligneExclueId !== null, fn ($query) => $query->whereKeyNot($ligneExclueId))
+            ->exists();
+
+        if ($existe) {
+            throw CommandeFournisseurException::matiereDejaPresente($matierePremiereId);
         }
     }
 

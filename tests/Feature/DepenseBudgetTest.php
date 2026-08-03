@@ -37,7 +37,7 @@ function actingAsBudgetUser(array $permissions = []): User
  */
 function budgetCourant(array $attributs = []): Budget
 {
-    return Budget::factory()->create(array_merge([
+    $budget = Budget::factory()->create(array_merge([
         'site_id' => Site::factory()->create()->id,
         'mois' => now()->startOfMonth()->toDateString(),
         'montant_alloue' => 1000,
@@ -45,6 +45,14 @@ function budgetCourant(array $attributs = []): Budget
         'seuil_alerte_90' => true,
         'seuil_alerte_100' => true,
     ], $attributs));
+
+    // Un budget est propre à un site : sans rattachement, l'utilisateur
+    // authentifié n'y a accès ni en lecture ni en écriture.
+    if ($user = auth()->user()) {
+        $user->sites()->syncWithoutDetaching([$budget->site_id]);
+    }
+
+    return $budget;
 }
 
 function moisCourant(): string
@@ -198,16 +206,18 @@ it('considère le dépassement quand le montant alloué est nul', function () {
 // ───────────────────────── 404 / listing ─────────────────────────
 
 it('retourne 404 si aucun budget pour ce site/mois', function () {
-    actingAsBudgetUser(['budget.view']);
+    $user = actingAsBudgetUser(['budget.view']);
     $site = Site::factory()->create();
+    rattacherAuxSites($user, $site);
 
     getJson("/api/sites/{$site->id}/budgets/2099-01")
         ->assertNotFound();
 });
 
 it('liste les budgets d\'un site avec leurs champs calculés', function () {
-    actingAsBudgetUser(['budget.view']);
+    $user = actingAsBudgetUser(['budget.view']);
     $site = Site::factory()->create();
+    rattacherAuxSites($user, $site);
     $budget = Budget::factory()->create([
         'site_id' => $site->id,
         'mois' => now()->startOfMonth()->toDateString(),

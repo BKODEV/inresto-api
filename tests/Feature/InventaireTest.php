@@ -114,8 +114,9 @@ it('supprime une ligne en cours', function () {
 });
 
 it('refuse toute modification de ligne sur un inventaire clôturé (409)', function () {
-    actingAsInventaireUser(['inventaire.update']);
+    $user = actingAsInventaireUser(['inventaire.update']);
     $site = Site::factory()->create();
+    rattacherAuxSites($user, $site);
     $matiere = MatierePremiere::factory()->create();
     $inventaire = $this->service->creer(['site_id' => $site->id], $this->userId);
     $this->service->ajouterOuModifierLigne($inventaire, ['matiere_premiere_id' => $matiere->id, 'quantite_physique' => 5], $this->userId);
@@ -230,8 +231,9 @@ it('annule toute la clôture si une ligne échoue (rollback atomique)', function
 // ───────────────────────── rapport ─────────────────────────
 
 it('calcule la couverture pour un inventaire en cours (ecart null)', function () {
-    actingAsInventaireUser(['inventaire.view', 'inventaire.create', 'inventaire.update']);
+    $user = actingAsInventaireUser(['inventaire.view', 'inventaire.create', 'inventaire.update']);
     $site = Site::factory()->create();
+    rattacherAuxSites($user, $site);
     $matiereA = MatierePremiere::factory()->create();
     $matiereB = MatierePremiere::factory()->create();
     stockSur($matiereA->id, $site->id, 8);
@@ -250,8 +252,9 @@ it('calcule la couverture pour un inventaire en cours (ecart null)', function ()
 });
 
 it('expose valeur totale et écarts figés dans le rapport après clôture', function () {
-    actingAsInventaireUser(['inventaire.view']);
+    $user = actingAsInventaireUser(['inventaire.view']);
     $site = Site::factory()->create();
+    rattacherAuxSites($user, $site);
     $matiere = MatierePremiere::factory()->create();
     stockSur($matiere->id, $site->id, 8, pmp: 10);
 
@@ -268,8 +271,9 @@ it('expose valeur totale et écarts figés dans le rapport après clôture', fun
 // ───────────────────────── destroy ─────────────────────────
 
 it('supprime un inventaire en cours sans lignes (200)', function () {
-    actingAsInventaireUser(['inventaire.delete']);
+    $user = actingAsInventaireUser(['inventaire.delete']);
     $inventaire = Inventaire::factory()->create();
+    rattacherAuxSites($user, $inventaire->site);
 
     deleteJson("/api/inventaires/{$inventaire->id}")->assertOk();
 
@@ -277,8 +281,9 @@ it('supprime un inventaire en cours sans lignes (200)', function () {
 });
 
 it('refuse de supprimer un inventaire en cours avec des lignes (409)', function () {
-    actingAsInventaireUser(['inventaire.delete', 'inventaire.create', 'inventaire.update']);
+    $user = actingAsInventaireUser(['inventaire.delete', 'inventaire.create', 'inventaire.update']);
     $site = Site::factory()->create();
+    rattacherAuxSites($user, $site);
     $inventaire = $this->service->creer(['site_id' => $site->id], $this->userId);
     $this->service->ajouterOuModifierLigne($inventaire, ['matiere_premiere_id' => MatierePremiere::factory()->create()->id, 'quantite_physique' => 5], $this->userId);
 
@@ -286,8 +291,9 @@ it('refuse de supprimer un inventaire en cours avec des lignes (409)', function 
 });
 
 it('refuse de supprimer un inventaire clôturé (409)', function () {
-    actingAsInventaireUser(['inventaire.delete']);
+    $user = actingAsInventaireUser(['inventaire.delete']);
     $inventaire = Inventaire::factory()->cloture()->create();
+    rattacherAuxSites($user, $inventaire->site);
 
     deleteJson("/api/inventaires/{$inventaire->id}")->assertStatus(409);
 });

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Requests\Budget;
 
 use App\Models\Budget;
+use App\Rules\SiteDansPerimetre;
 use Carbon\Carbon;
 use Closure;
 use Illuminate\Contracts\Validation\ValidationRule;
@@ -33,6 +34,7 @@ class UpdateBudgetRequest extends FormRequest
                 'sometimes',
                 'integer',
                 'exists:sites,id',
+                new SiteDansPerimetre($this->user()),
                 Rule::unique('budgets')
                     ->where(fn ($query) => $query->whereDate('mois', $mois))
                     ->ignore($budget->id),

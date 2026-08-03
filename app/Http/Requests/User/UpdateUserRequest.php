@@ -35,8 +35,21 @@ class UpdateUserRequest extends FormRequest
             'statut' => ['sometimes', Rule::in(['actif', 'inactif'])],
             'roles' => ['sometimes', 'array'],
             'roles.*' => ['string', 'exists:roles,name'],
-            'sites' => ['sometimes', 'array'],
+            // Omettre `sites` laisse le périmètre intact (cf. `array_key_exists`
+            // dans UserService::update) ; l'envoyer vide le retirerait, ce qui
+            // rendrait le compte inutilisable. On refuse donc le tableau vide.
+            'sites' => ['sometimes', 'array', 'min:1'],
             'sites.*' => ['integer', 'exists:sites,id'],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'sites.min' => 'Un compte doit rester rattaché à au moins un site.',
         ];
     }
 }

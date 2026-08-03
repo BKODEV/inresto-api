@@ -73,4 +73,13 @@ class MouvementStock extends Model
     {
         return $this->morphTo();
     }
+
+    /**
+     * Valorisation du mouvement au PMP figé à l'instant T — jamais au PMP
+     * courant : c'est ce qui rend l'historique stable dans le temps.
+     */
+    public function valeur(): float
+    {
+        return round((float) $this->quantite * (float) $this->pmp_au_moment, 2);
+    }
 }

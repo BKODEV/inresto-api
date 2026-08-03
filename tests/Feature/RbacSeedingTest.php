@@ -40,6 +40,16 @@ it('donne toutes les permissions au super-admin', function () {
     expect($superAdmin->permissions()->count())->toBe(Permission::count());
 });
 
+it('expose une permission dédiée pour déléguer l\'accès aux Paramètres', function () {
+    // La section Paramètres s'ouvre sur `parametre.view`, indépendamment des
+    // permissions de chaque écran qu'elle contient : c'est ce qui permet au
+    // super-admin de déléguer la configuration sans céder son rôle.
+    seedRbac();
+
+    expect(PermissionCatalog::allPermissionNames())->toContain('parametre.view')
+        ->and(Role::where('name', 'gerant')->first()->hasPermissionTo('parametre.view'))->toBeTrue();
+});
+
 it('installe une instance neuve et crée le premier super-admin via inresto:install', function () {
     $this->artisan('inresto:install', [
         '--identifiant' => 'admin',

@@ -86,8 +86,9 @@ function pdfCommandeClient(bool $avecParametres = true): CommandeClient
 }
 
 it('génère le bon de commande fournisseur en PDF', function () {
-    actingWithPdfPerms(['commande-fournisseur.view']);
+    $user = actingWithPdfPerms(['commande-fournisseur.view']);
     $site = Site::factory()->create();
+    rattacherAuxSites($user, $site);
     ParametreEtablissement::factory()->create(['site_id' => $site->id]);
     $commande = CommandeFournisseur::factory()->create();
     LigneCommandeFournisseur::factory()->count(2)->create(['commande_fournisseur_id' => $commande->id]);
@@ -134,6 +135,34 @@ it('génère la fiche technique en PDF', function () {
     getJson("/api/fiches-techniques/{$fiche->id}/pdf")
         ->assertOk()
         ->assertHeader('content-type', 'application/pdf');
+});
+
+it('titre la fiche technique avec l\'établissement du site demandé', function () {
+    // La fiche est une définition partagée : elle ne porte aucun site. L'en-tête
+    // vient donc du site d'impression, et non plus du seul site PRINCIPAL —
+    // lequel n'a pas forcément de fiche d'établissement.
+    $site = Site::factory()->create();
+    ParametreEtablissement::factory()->create([
+        'site_id' => $site->id,
+        'nom_commercial' => 'Chez Awa',
+    ]);
+    $fiche = FicheTechnique::factory()->create();
+
+    $html = app(PdfService::class)->htmlFicheTechnique($fiche, $site->id);
+
+    expect($html)->toContain('Chez Awa')
+        ->and($html)->not->toContain('Paramètres établissement non configurés');
+});
+
+it('refuse la fiche technique en PDF pour un site hors périmètre (403)', function () {
+    $sien = Site::factory()->create();
+    $autre = Site::factory()->create();
+    $user = actingWithPdfPerms(['fichetechnique.view']);
+    $user->sites()->sync([$sien->id]);
+
+    $fiche = FicheTechnique::factory()->create();
+
+    getJson("/api/fiches-techniques/{$fiche->id}/pdf?site_id={$autre->id}")->assertForbidden();
 });
 
 it('rend une facture avec des montants cohérents (remise incluse)', function () {

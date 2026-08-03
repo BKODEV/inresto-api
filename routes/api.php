@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\FournisseurController;
 use App\Http\Controllers\Api\InventaireController;
 use App\Http\Controllers\Api\LigneCommandeFournisseurController;
 use App\Http\Controllers\Api\MatierePremiereController;
+use App\Http\Controllers\Api\MouvementStockController;
 use App\Http\Controllers\Api\PaiementController;
 use App\Http\Controllers\Api\ParametreEtablissementController;
 use App\Http\Controllers\Api\Parametres\CaisseController;
@@ -26,6 +27,7 @@ use App\Http\Controllers\Api\PdfController;
 use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\PointDeVenteController;
 use App\Http\Controllers\Api\ProduitController;
+use App\Http\Controllers\Api\PublicMenuController;
 use App\Http\Controllers\Api\ReceptionController;
 use App\Http\Controllers\Api\RemiseController;
 use App\Http\Controllers\Api\Reporting\BudgetController as ReportingBudgetController;
@@ -37,6 +39,7 @@ use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SessionCaisseController;
 use App\Http\Controllers\Api\SiteController;
 use App\Http\Controllers\Api\SousRecetteController;
+use App\Http\Controllers\Api\StockController;
 use App\Http\Controllers\Api\TableSalleController;
 use App\Http\Controllers\Api\UserController;
 use Illuminate\Support\Facades\Route;
@@ -51,6 +54,16 @@ Route::prefix('auth')->group(function () {
         Route::get('me', [AuthController::class, 'me'])->name('auth.me');
         Route::post('logout', [AuthController::class, 'logout'])->name('auth.logout');
     });
+});
+
+/*
+ * Menu public par QR code — SEUL périmètre non authentifié de l'API (avec le
+ * login et la consommation d'un lien de réinitialisation). Le jeton de la table
+ * fait office de clé d'accès ; le throttle limite le balayage de jetons et
+ * l'abus d'un lien qui circule librement.
+ */
+Route::prefix('public')->middleware('throttle:60,1')->group(function () {
+    Route::get('menu/{public_token}', [PublicMenuController::class, 'show'])->name('public.menu.show');
 });
 
 Route::middleware('auth:sanctum')->group(function () {
@@ -136,8 +149,18 @@ Route::middleware('auth:sanctum')->group(function () {
         ->parameters(['fiches-techniques' => 'fiche_technique']);
 
     // Module Salle — Produits (définition partagée) + produits sur une carte.
+    // La photo alimente le menu public : elle ne s'écrit que par téléversement,
+    // jamais par le PUT du produit.
+    Route::post('produits/{produit}/photo', [ProduitController::class, 'uploadPhoto'])
+        ->name('produits.photo.upload');
+    Route::delete('produits/{produit}/photo', [ProduitController::class, 'deletePhoto'])
+        ->name('produits.photo.delete');
     Route::apiResource('produits', ProduitController::class)
         ->parameters(['produits' => 'produit']);
+    // Déclaré avant la ressource : composer une carte produit par produit est
+    // impraticable, ce lot ajoute toute une sélection en une requête.
+    Route::post('cartes/{carte}/produits/lot', [CarteProduitController::class, 'storeLot'])
+        ->name('cartes.produits.lot');
     Route::apiResource('cartes.produits', CarteProduitController::class)
         ->only(['index', 'store', 'update', 'destroy'])
         ->parameters(['cartes' => 'carte', 'produits' => 'carte_produit']);
@@ -147,6 +170,14 @@ Route::middleware('auth:sanctum')->group(function () {
         ->parameters(['tables' => 'table']);
     Route::patch('tables/{table}/statut', [TableSalleController::class, 'changerStatut'])
         ->name('tables.statut');
+
+    // Module Salle — QR codes du menu public (côté administration).
+    Route::post('tables/{table}/regenerer-token', [TableSalleController::class, 'regenererToken'])
+        ->name('tables.regenerer-token');
+    Route::get('tables/{table}/qr-pdf', [PdfController::class, 'qrTable'])
+        ->name('tables.qr-pdf');
+    Route::get('points-de-vente/{point_de_vente}/qr-planche-pdf', [PdfController::class, 'qrPlanchePointDeVente'])
+        ->name('points-de-vente.qr-planche-pdf');
 
     // Module Salle — Sessions de caisse (ouverture/fermeture).
     Route::apiResource('sessions-caisse', SessionCaisseController::class)
@@ -183,6 +214,12 @@ Route::middleware('auth:sanctum')->group(function () {
         ->name('commandes-client.annuler');
     Route::delete('commandes-client/{commande}/lignes/{ligne}', [AnnulationController::class, 'annulerLigne'])
         ->name('commandes-client.lignes.annuler');
+
+    // État du stock par site + journal des mouvements (lecture seule, écran
+    // opérationnel de cuisine — permission `stock.view`).
+    Route::get('stock', [StockController::class, 'index'])->name('stock.index');
+    Route::get('stock/mouvements', [MouvementStockController::class, 'index'])
+        ->name('stock.mouvements.index');
 
     Route::apiResource('inventaires', InventaireController::class)
         ->only(['index', 'store', 'show', 'destroy']);

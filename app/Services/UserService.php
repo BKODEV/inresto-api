@@ -236,6 +236,10 @@ class UserService
     /**
      * Périmètre : un non-super-admin ne rattache qu'à ses propres sites.
      *
+     * Le cas du tableau vide n'est plus atteignable par l'API (les FormRequests
+     * exigent au moins un site) ; il reste toléré ici comme garde défensive
+     * pour les appels internes qui ne passeraient pas par la validation.
+     *
      * @param  array<int, int>  $siteIds
      */
     private function assertSitesDansPerimetre(User $acteur, array $siteIds): void

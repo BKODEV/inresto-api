@@ -12,6 +12,7 @@ use App\Http\Requests\Reception\StoreReceptionRequest;
 use App\Http\Resources\ReceptionResource;
 use App\Models\Reception;
 use App\Services\ReceptionService;
+use App\Support\SitePerimetre;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -27,6 +28,11 @@ class ReceptionController extends Controller
     {
         $this->authorize('viewAny', Reception::class);
 
+        $sites = SitePerimetre::resoudre(
+            $request->user(),
+            $request->filled('site_id') ? $request->integer('site_id') : null,
+        );
+
         $receptions = Reception::query()
             ->with(['commande', 'site'])
             ->when(
@@ -34,8 +40,8 @@ class ReceptionController extends Controller
                 fn (Builder $query) => $query->where('commande_fournisseur_id', $request->integer('commande_fournisseur_id'))
             )
             ->when(
-                $request->filled('site_id'),
-                fn (Builder $query) => $query->where('site_id', $request->integer('site_id'))
+                $sites !== null,
+                fn (Builder $query) => $query->whereIn('site_id', $sites)
             )
             ->orderByDesc('date_reception')
             ->paginate($request->integer('per_page', 15));

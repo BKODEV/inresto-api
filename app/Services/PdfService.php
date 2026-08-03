@@ -9,7 +9,9 @@ use App\Models\CommandeClient;
 use App\Models\CommandeFournisseur;
 use App\Models\FicheTechnique;
 use App\Models\ParametreEtablissement;
+use App\Models\PointDeVente;
 use App\Models\Site;
+use App\Models\TableSalle;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
@@ -28,6 +30,8 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class PdfService
 {
+    public function __construct(private readonly QrCodeService $qr) {}
+
     /**
      * Bon de commande fournisseur (A4).
      *
@@ -120,7 +124,7 @@ class PdfService
     /**
      * Fiche technique (A4, atelier cuisine).
      */
-    public function htmlFicheTechnique(FicheTechnique $fiche): string
+    public function htmlFicheTechnique(FicheTechnique $fiche, ?int $siteId = null): string
     {
         $fiche->loadMissing([
             'produit',
@@ -129,7 +133,11 @@ class PdfService
             'lignesSousRecette.sousRecette',
         ]);
 
-        $parametre = $this->parametresPourSite($this->sitePrincipal());
+        // Une fiche technique est une définition partagée : elle ne porte aucun
+        // site. L'en-tête prend donc le site depuis lequel on imprime (`?site_id=`),
+        // et retombe sur le site PRINCIPAL à défaut — comme le bon de commande.
+        $site = $siteId !== null ? Site::find($siteId) : $this->sitePrincipal();
+        $parametre = $this->parametresPourSite($site);
 
         return View::make('pdf.fiche-technique', [
             'fiche' => $fiche,
@@ -141,11 +149,74 @@ class PdfService
         ])->render();
     }
 
-    public function ficheTechnique(FicheTechnique $fiche): Response
+    public function ficheTechnique(FicheTechnique $fiche, ?int $siteId = null): Response
     {
         return $this->streamA4(
-            $this->htmlFicheTechnique($fiche),
+            $this->htmlFicheTechnique($fiche, $siteId),
             "fiche-technique-{$fiche->id}.pdf",
+        );
+    }
+
+    /**
+     * Chevalet QR d'une table (A6) : le convive scanne, la page menu s'ouvre.
+     *
+     * Le QR encode l'URL publique complète de la table ; l'en-tête vient des
+     * paramètres du site du point de vente.
+     */
+    public function htmlQrTable(TableSalle $table): string
+    {
+        $table->loadMissing('pointDeVente.site');
+
+        $parametre = $this->parametresPourSite($table->pointDeVente?->site);
+
+        return View::make('pdf.qr-table', [
+            'table' => $table,
+            'parametre' => $parametre,
+            'logoDataUri' => $this->logoDataUri($parametre),
+            'qrDataUri' => $this->qr->dataUri((string) $table->menuUrl(), 600),
+        ])->render();
+    }
+
+    public function qrTable(TableSalle $table): Response
+    {
+        return Pdf::loadHTML($this->htmlQrTable($table))
+            ->setPaper('a6')
+            ->stream("qr-table-{$table->numero}.pdf");
+    }
+
+    /**
+     * Planche A4 des QR de toutes les tables d'un point de vente : une seule
+     * impression pour équiper la salle entière.
+     */
+    public function htmlQrPlanchePointDeVente(PointDeVente $pointDeVente): string
+    {
+        $pointDeVente->loadMissing('site');
+
+        $parametre = $this->parametresPourSite($pointDeVente->site);
+
+        // Une table sans jeton n'a pas de QR imprimable : on l'omet plutôt que
+        // de produire une case vide (`inresto:backfill-table-tokens` corrige).
+        $tables = TableSalle::query()
+            ->where('point_de_vente_id', $pointDeVente->id)
+            ->whereNotNull('public_token')
+            ->orderBy('numero')
+            ->get();
+
+        return View::make('pdf.qr-planche', [
+            'pointDeVente' => $pointDeVente,
+            'parametre' => $parametre,
+            'tables' => $tables,
+            'qrParTable' => $tables->mapWithKeys(
+                fn (TableSalle $table) => [$table->id => $this->qr->dataUri((string) $table->menuUrl(), 400)]
+            ),
+        ])->render();
+    }
+
+    public function qrPlanchePointDeVente(PointDeVente $pointDeVente): Response
+    {
+        return $this->streamA4(
+            $this->htmlQrPlanchePointDeVente($pointDeVente),
+            "qr-planche-{$pointDeVente->id}.pdf",
         );
     }
 

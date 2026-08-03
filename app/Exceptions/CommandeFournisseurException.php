@@ -45,6 +45,14 @@ class CommandeFournisseurException extends RuntimeException
         return new self("L'unité de mesure (id: {$uniteId}) est introuvable ou inactive.");
     }
 
+    public static function matiereDejaPresente(int $matierePremiereId): self
+    {
+        return new self(
+            "Cet article (id: {$matierePremiereId}) est déjà présent dans la commande : modifiez la quantité de la ligne existante.",
+            409,
+        );
+    }
+
     public static function matiereHorsCatalogue(int $matierePremiereId): self
     {
         return new self("La matière première (id: {$matierePremiereId}) n'est pas au catalogue de ce fournisseur.");

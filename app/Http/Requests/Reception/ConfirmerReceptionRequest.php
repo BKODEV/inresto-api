@@ -30,12 +30,26 @@ class ConfirmerReceptionRequest extends FormRequest
             'lignes.*.matiere_premiere_id' => [
                 'required',
                 'integer',
+                // Une matière ne peut être reçue qu'une fois par réception :
+                // deux lignes produiraient deux mouvements de stock et deux
+                // dépenses pour la même livraison (PMP et budget faussés).
+                'distinct',
                 Rule::exists('matieres_premieres', 'id')->where('statut', 'actif'),
             ],
             // Pas d'unité au contrat : imposée par le catalogue (unité d'achat),
             // celle-là même qui porte le facteur de conversion du PMP.
             'lignes.*.quantite_recue' => ['required', 'numeric', 'gt:0'],
             'lignes.*.prix_unitaire_reel' => ['required', 'numeric', 'gt:0'],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'lignes.*.matiere_premiere_id.distinct' => 'Cet article est déjà présent dans la réception : cumulez les quantités sur une seule ligne.',
         ];
     }
 

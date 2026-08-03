@@ -27,6 +27,10 @@ final class PermissionCatalog
                 ...self::crud('role', 'les rôles'),
             ],
             'Configuration' => [
+                // Ouvre la section Paramètres dans son ensemble, indépendamment
+                // des permissions de chaque écran qu'elle contient. Permet au
+                // super-admin de déléguer la configuration sans céder son rôle.
+                'parametre.view' => 'Accéder à la section Paramètres',
                 ...self::crud('site', 'les sites'),
                 ...self::crud('parametre_etablissement', "les paramètres d'établissement"),
                 ...self::crud('point-de-vente', 'les points de vente'),
@@ -49,6 +53,9 @@ final class PermissionCatalog
                 ...self::crud('sousrecette', 'les sous-recettes'),
                 ...self::crud('fichetechnique', 'les fiches techniques'),
                 ...self::crud('inventaire', 'les inventaires'),
+                // Lecture seule : le stock est dérivé des mouvements, seul le
+                // StockService l'écrit. Pas de CRUD, donc pas de crud().
+                'stock.view' => "Consulter l'état du stock",
             ],
             'Salle & Vente' => [
                 ...self::crud('carte', 'les cartes'),

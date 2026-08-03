@@ -45,7 +45,10 @@ class BudgetReportService
     {
         $depenses = DB::table('depenses as d')
             ->join('budgets as b', 'b.id', '=', 'd.budget_id')
-            ->whereBetween('d.date_depense', [$periode->debut->toDateString(), $periode->fin->toDateString()])
+            // Bornes en date-heure (et non en chaîne « Y-m-d ») : sur un moteur
+            // sans type date natif, la comparaison est lexicographique et
+            // « 2026-07-31 00:00:00 » > « 2026-07-31 » exclurait le dernier jour.
+            ->whereBetween('d.date_depense', [$periode->debut->copy()->startOfDay(), $periode->fin->copy()->endOfDay()])
             ->when($siteIds !== null, fn (QueryBuilder $q) => $q->whereIn('b.site_id', $siteIds))
             ->orderBy('d.date_depense')
             ->selectRaw('d.id, b.site_id, d.budget_id, d.reception_id, d.type, d.libelle, d.montant, d.date_depense')

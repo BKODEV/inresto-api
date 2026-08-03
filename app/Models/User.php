@@ -108,6 +108,19 @@ class User extends Authenticatable
     }
 
     /**
+     * Le site fait-il partie du périmètre opérationnel de l'utilisateur ?
+     * Le super-admin n'est borné par aucun périmètre, ici comme ailleurs.
+     */
+    public function appartientAuSite(?int $siteId): bool
+    {
+        if ($this->isSuperAdmin()) {
+            return true;
+        }
+
+        return $siteId !== null && $this->sites()->whereKey($siteId)->exists();
+    }
+
+    /**
      * L'utilisateur partage-t-il au moins un site (périmètre) avec un autre ?
      */
     public function partageSiteAvec(User $autre): bool

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Requests\Reception;
 
 use App\Models\Reception;
+use App\Rules\SiteDansPerimetre;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -29,11 +30,13 @@ class StoreReceptionRequest extends FormRequest
                 Rule::exists('commandes_fournisseur', 'id')
                     ->whereIn('statut', ['envoyee', 'partiellement_recue']),
             ],
-            // La cuisine destinataire : doit exister et être active.
+            // La cuisine destinataire : doit exister, être active, et relever du
+            // périmètre du réceptionnaire (le stock entre réellement dessus).
             'site_id' => [
                 'required',
                 'integer',
                 Rule::exists('sites', 'id')->where('statut', 'actif'),
+                new SiteDansPerimetre($this->user()),
             ],
             'date_reception' => ['nullable', 'date'],
             'observations' => ['nullable', 'string'],

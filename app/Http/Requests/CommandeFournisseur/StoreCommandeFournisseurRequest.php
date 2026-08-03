@@ -34,6 +34,9 @@ class StoreCommandeFournisseurRequest extends FormRequest
             'lignes.*.matiere_premiere_id' => [
                 'required_with:lignes',
                 'integer',
+                // Une matière ne peut figurer qu'une fois par commande : sinon le
+                // cumul commandé/reçu du module réception devient ambigu.
+                'distinct',
                 Rule::exists('matieres_premieres', 'id')->where('statut', 'actif'),
                 new MatiereAuCatalogue($fournisseurId),
             ],
@@ -41,6 +44,16 @@ class StoreCommandeFournisseurRequest extends FormRequest
             // d'achat du catalogue (couple fournisseur/matière), estampée serveur.
             'lignes.*.quantite_commandee' => ['required_with:lignes', 'numeric', 'gt:0'],
             'lignes.*.prix_unitaire_previsionnel' => ['required_with:lignes', 'numeric', 'gt:0'],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'lignes.*.matiere_premiere_id.distinct' => 'Cet article est déjà sélectionné dans la commande : modifiez la quantité de la ligne existante.',
         ];
     }
 }

@@ -48,4 +48,27 @@ class Stock extends Model
     {
         return $this->belongsTo(Site::class);
     }
+
+    /**
+     * Valeur du stock détenu sur ce site : quantité courante × PMP du site.
+     * Le PMP étant propre au couple (matière, site), cette valeur ne se cumule
+     * qu'entre sites, jamais avec un PMP « global » qui n'existe pas.
+     */
+    public function valeur(): float
+    {
+        return round((float) $this->stock_courant * (float) $this->pmp, 2);
+    }
+
+    /**
+     * Vrai quand la quantité courante est retombée au niveau du seuil d'alerte
+     * de la matière. Un seuil nul ou absent désactive l'alerte.
+     *
+     * Nécessite la relation `matiere` chargée (sinon une requête par ligne).
+     */
+    public function estSousSeuil(): bool
+    {
+        $seuil = (float) ($this->matiere?->seuil_alerte_stock ?? 0);
+
+        return $seuil > 0 && (float) $this->stock_courant <= $seuil;
+    }
 }

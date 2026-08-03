@@ -22,6 +22,11 @@ class LigneCommandeFournisseurResource extends JsonResource
             'quantite_commandee' => $this->quantite_commandee,
             'prix_unitaire_previsionnel' => $this->prix_unitaire_previsionnel,
             'sous_total' => $this->sousTotal(),
+            // Dérivées des réceptions, posées par
+            // CommandeFournisseurService::chargerRelations() : absentes des
+            // réponses qui n'exposent pas la commande complète.
+            'quantite_recue' => $this->whenNotNull($this->quantite_recue),
+            'quantite_restante' => $this->whenNotNull($this->quantite_restante),
             'matiere_premiere' => new MatierePremiereResource($this->whenLoaded('matierePremiere')),
             'unite' => new UniteDeMesureResource($this->whenLoaded('unite')),
             'created_at' => $this->created_at?->toIso8601String(),
