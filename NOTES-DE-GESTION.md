@@ -238,7 +238,7 @@ en transaction avec `lockForUpdate`, et le PMP est recalculé à chaque entrée.
 | **Commande fournisseur** | **Aucun** | Une commande n'est qu'un engagement prévisionnel. Elle ne touche jamais le stock. |
 | **Réception** | **Entrée** (`StockService::entree`) | **Seul** déclencheur d'entrée de stock. Atomique : entrée + dépense budgétaire dans la même transaction. |
 | **Inventaire (clôture)** | **Correction** (`StockService::correctionInventaire`) | **Seul** déclencheur d'ajustement. Écart = physique − théorique, théorique figé à la clôture. |
-| **Vente** *(à venir, Module Salle)* | **Sortie** (`StockService::sortie`) | Le déstockage à la vente passera par ce même gardien. |
+| **Vente (au service)** | **Sortie** (`StockService::sortie`) | Déclenché par `CommandeClientService` au passage au service, via la fiche technique figée. Jamais bloquant : un stock insuffisant part en négatif plutôt que d'empêcher de servir. |
 
 Conséquence : on ne « corrige » jamais un stock à la main en base. Un écart
 constaté = un inventaire. Une entrée de marchandise = une réception.
@@ -474,6 +474,26 @@ sans permission — ce sont ses propres sites), pas la liste de gestion.
 > utilisateur ↔ point de vente est **obsolète** : tout périmètre passe désormais
 > par le **site**.
 
+### Le périmètre est une frontière, pas un confort d'affichage
+
+Le serveur **applique** le périmètre, il ne se contente pas de le proposer :
+
+| Où | Comment |
+|---|---|
+| Lectures (stock, mouvements, inventaires, réceptions, budgets, PDF) | `App\Support\SitePerimetre` : un `site_id` hors périmètre renvoie **403**, son absence borne la requête aux sites de l'utilisateur |
+| Écritures (réception, inventaire, budget) | règle `App\Rules\SiteDansPerimetre` sur le champ `site_id` → **422** |
+| Accès direct par identifiant | policies `Inventaire` / `Reception` / `Budget` : filtrer l'index ne protège pas `GET /api/inventaires/{id}` |
+
+**Deux notions de « global » cohabitent, à ne pas confondre** : en
+**opérationnel**, seul le **super-admin** dépasse son périmètre ;
+**`reporting.global`** n'élargit que la **lecture analytique**. Consulter les
+chiffres d'un site ne vaut pas autorisation d'y écrire.
+
+> **Pourquoi cette sévérité ?** Stock, PMP et budgets sont propres au site, et il
+> n'existe **aucun mouvement de transfert inter-sites**. Une réception ou un
+> inventaire posé sur le mauvais site ne se répare que par des corrections
+> d'inventaire des deux côtés, avec l'impact sur le PMP que cela suppose.
+
 ---
 
 ## Utilisateurs, rôles & permissions
@@ -519,6 +539,16 @@ assigner un rôle, de niveau **supérieur ou égal** au sien.
 Un non-super-admin ne **rattache** et ne **gère** des utilisateurs que dans **ses
 propres sites** (pivot `user_site`). Rattacher à un site hors périmètre est refusé.
 
+**Au moins un site est obligatoire à la création d'un compte**, et on ne peut pas
+vider le périmètre d'un compte existant (omettre le champ le laisse intact,
+l'envoyer vide est refusé).
+
+> **Pourquoi ?** Le périmètre borne désormais toutes les lectures et écritures
+> rattachées à un site — voir [Définitions partagées vs opérations rattachées au
+> site](#définitions-partagées-vs-opérations-rattachées-au-site). Un compte sans
+> site n'aurait accès à rien : il serait en 403 permanent sur le stock, les
+> inventaires, les réceptions et les budgets.
+
 ### Le super-admin court-circuite tout
 
 Le `super-admin` **ignore** hiérarchie **et** périmètre (il gère tout, sur tous les
@@ -548,9 +578,6 @@ l'utilisent) ne touche que les versions actives.
 ---
 
 ## Prix de vente porté par la carte, pas par le produit
-
-> **Règle à venir — Module Salle / Lot A « Produits & Carte-Produit ».**
-> Consignée ici en amont du développement car c'est une décision structurante.
 
 ### Règle d'or
 
@@ -606,9 +633,8 @@ ne peut pas en ouvrir une seconde sur la **même** caisse (409).
 ### Montant théorique & écart
 
 - `montant_theorique = fonds_initial + Σ paiements encaissés sur la session`.
-  **Point d'extension Lot C** : la table `paiements` n'existe pas encore, donc
-  `SessionCaisse::montantPaye()` renvoie 0 → `montant_theorique = fonds_initial`
-  pour l'instant.
+  `SessionCaisse::montantPaye()` somme les paiements des commandes rattachées à
+  la session.
 - `ecart = montant_reel − montant_theorique`. `montant_reel` est **saisi
   obligatoirement** à la fermeture (0 accepté = caisse vide). **L'ouvreur n'a pas
   à être le fermeur.**
