@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\DepenseController;
 use App\Http\Controllers\Api\FicheTechniqueController;
 use App\Http\Controllers\Api\FournisseurController;
 use App\Http\Controllers\Api\InventaireController;
+use App\Http\Controllers\Api\JournalController;
 use App\Http\Controllers\Api\LigneCommandeFournisseurController;
 use App\Http\Controllers\Api\MatierePremiereController;
 use App\Http\Controllers\Api\MouvementStockController;
@@ -165,11 +166,23 @@ Route::middleware('auth:sanctum')->group(function () {
         ->only(['index', 'store', 'update', 'destroy'])
         ->parameters(['cartes' => 'carte', 'produits' => 'carte_produit']);
 
+    // Journal d'activité — lecture seule, agrège les traces des autres modules.
+    Route::get('journal', [JournalController::class, 'index'])->name('journal.index');
+
     // Module Salle — Tables de salle (CRUD par PDV + changement de statut manuel).
+    // Déclarée AVANT l'apiResource, sinon `tables/{table}` capture « lot ».
+    Route::post('tables/lot', [TableSalleController::class, 'storeLot'])
+        ->name('tables.lot');
     Route::apiResource('tables', TableSalleController::class)
         ->parameters(['tables' => 'table']);
     Route::patch('tables/{table}/statut', [TableSalleController::class, 'changerStatut'])
         ->name('tables.statut');
+    // Retrait/remise en service : gouverné par `table.delete`, c'est la
+    // contrepartie réversible de la suppression pour une table qui a servi.
+    Route::post('tables/{table}/archiver', [TableSalleController::class, 'archiver'])
+        ->name('tables.archiver');
+    Route::post('tables/{table}/reactiver', [TableSalleController::class, 'reactiver'])
+        ->name('tables.reactiver');
 
     // Module Salle — QR codes du menu public (côté administration).
     Route::post('tables/{table}/regenerer-token', [TableSalleController::class, 'regenererToken'])

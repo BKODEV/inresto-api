@@ -185,6 +185,41 @@ it('affiche le bandeau quand le site n\'a pas de fiche de paramètres', function
     expect($html)->toContain('Paramètres établissement non configurés');
 });
 
+/**
+ * Un document imprimé doit rester identique à lui-même. Sans numéro figé, les
+ * gabarits relisaient la table à chaque impression : renommer T07 en T12
+ * réécrivait toutes ses factures passées, qui ne correspondaient plus au ticket
+ * remis au client. La facture normalisée impose l'inverse.
+ */
+it('réimprime une facture avec le numéro de table du jour de la commande', function () {
+    $commande = pdfCommandeClient();
+    $commande->update(['table_numero' => 'T07']);
+    $commande->table->update(['numero' => 'T12']);
+
+    $html = app(PdfService::class)->htmlFactureClient($commande->fresh());
+
+    expect($html)->toContain('T07')
+        ->and($html)->not->toContain('T12');
+});
+
+/**
+ * Garde-fou du choix de conception de l'archivage.
+ *
+ * L'archivage passe par une colonne `archivee_le` et non par `SoftDeletes` :
+ * un scope global exclurait la table de `CommandeClient::table()`, et ce
+ * gabarit lit `$commande->table->numero` à l'impression. Passer un jour au
+ * soft delete casserait donc la réimpression de tout l'historique — ce test
+ * échouerait avant que quiconque s'en aperçoive en production.
+ */
+it('réimprime la facture d\'une table archivée avec son numéro', function () {
+    $commande = pdfCommandeClient();
+    $commande->table->update(['numero' => 'T07', 'archivee_le' => now()]);
+
+    $html = app(PdfService::class)->htmlFactureClient($commande->fresh());
+
+    expect($html)->toContain('T07');
+});
+
 it('affiche la référence de facture normalisée si présente', function () {
     $commande = pdfCommandeClient();
     $commande->update(['reference_facture_normalisee' => 'FNE-2026-0001']);

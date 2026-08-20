@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\TypeImpression;
 use App\Http\Controllers\Controller;
 use App\Models\CommandeClient;
 use App\Models\CommandeFournisseur;
 use App\Models\FicheTechnique;
+use App\Models\Impression;
 use App\Models\PointDeVente;
 use App\Models\TableSalle;
 use App\Services\PdfService;
@@ -41,6 +43,8 @@ class PdfController extends Controller
     {
         $this->authorize('view', $commande);
 
+        $this->journaliser($commande, TypeImpression::Facture);
+
         return $this->service->factureClient($commande);
     }
 
@@ -48,7 +52,30 @@ class PdfController extends Controller
     {
         $this->authorize('view', $commande);
 
+        $this->journaliser($commande, TypeImpression::Recu);
+
         return $this->service->recuClient($commande);
+    }
+
+    /**
+     * Trace l'impression d'un document d'argent.
+     *
+     * La réimpression d'une note est un vecteur de fraude connu — le document
+     * ressort, l'encaissement non. Annulations et remises portent déjà leur
+     * auteur et leur motif ; l'impression était le seul geste sensible sans
+     * aucune trace.
+     *
+     * Journalisé AVANT le rendu : c'est la demande qu'on enregistre, et un
+     * échec de génération du PDF ne doit pas effacer le fait qu'elle a eu lieu.
+     */
+    private function journaliser(CommandeClient $commande, TypeImpression $type): void
+    {
+        Impression::create([
+            'user_id' => request()->user()->id,
+            'type' => $type->value,
+            'imprimable_type' => $commande->getMorphClass(),
+            'imprimable_id' => $commande->id,
+        ]);
     }
 
     public function ficheTechnique(Request $request, FicheTechnique $fiche_technique): Response

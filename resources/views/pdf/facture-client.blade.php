@@ -13,7 +13,7 @@
     <div class="muted">N° {{ $commande->id }}</div>
     <div class="muted">{{ optional($commande->date_heure)->format('d/m/Y H:i') }}</div>
     @if ($commande->table)
-        <div class="muted">Table {{ $commande->table->numero }}</div>
+        <div class="muted">Table {{ $commande->table_numero ?? $commande->table->numero }}</div>
     @endif
 @endsection
 

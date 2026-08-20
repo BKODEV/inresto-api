@@ -8,6 +8,7 @@ use App\Enums\Statut;
 use App\Enums\StatutCommandeClient;
 use App\Helpers\ApiResponse;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\CommandeClient\IndexCommandeClientRequest;
 use App\Http\Requests\CommandeClient\StoreCommandeClientLigneRequest;
 use App\Http\Requests\CommandeClient\StoreCommandeClientRequest;
 use App\Http\Resources\CommandeClientResource;
@@ -15,9 +16,10 @@ use App\Http\Resources\LigneCommandeClientResource;
 use App\Models\CommandeClient;
 use App\Models\PointDeVente;
 use App\Services\CommandeClientService;
+use App\Support\SitePerimetre;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 
 class CommandeClientController extends Controller
 {
@@ -27,29 +29,72 @@ class CommandeClientController extends Controller
     public function __construct(private readonly CommandeClientService $service) {}
 
     /**
-     * Liste les commandes (filtres optionnels ?table_id et ?statut).
+     * Liste paginée des commandes, du plus récent au plus ancien.
+     *
+     * Paginée et filtrée en base, jamais côté client : sans cela, l'écran de
+     * prise de commande retéléchargeait tout l'historique du restaurant —
+     * lignes et produits compris — toutes les vingt secondes, pour n'en garder
+     * que les quelques commandes vivantes.
+     *
+     * Filtres : `point_de_vente_id`, `table_id`, `session_caisse_id`,
+     * `statut[]`, et une plage `date_debut`/`date_fin`.
+     *
+     * Le périmètre de site s'applique via la table, seul chemin entre une
+     * commande et son site (commande → table → point de vente → site).
      */
-    public function index(Request $request): JsonResponse
+    public function index(IndexCommandeClientRequest $request): JsonResponse
     {
-        $this->authorize('viewAny', CommandeClient::class);
+        $filtres = $request->validated();
+        $sites = SitePerimetre::resoudre($request->user(), null);
 
         $commandes = CommandeClient::query()
             ->with(self::RELATIONS)
             ->when(
-                $request->filled('table_id'),
-                fn (Builder $query) => $query->where('table_id', $request->integer('table_id'))
+                $sites !== null,
+                fn (Builder $query) => $query->whereHas(
+                    'table.pointDeVente',
+                    fn (Builder $pdv) => $pdv->whereIn('site_id', $sites)
+                )
             )
             ->when(
-                $request->filled('statut'),
-                fn (Builder $query) => $query->where('statut', $request->string('statut'))
+                isset($filtres['point_de_vente_id']),
+                fn (Builder $query) => $query->whereHas(
+                    'table',
+                    fn (Builder $table) => $table->where('point_de_vente_id', $filtres['point_de_vente_id'])
+                )
+            )
+            ->when(
+                isset($filtres['table_id']),
+                fn (Builder $query) => $query->where('table_id', $filtres['table_id'])
+            )
+            ->when(
+                isset($filtres['session_caisse_id']),
+                fn (Builder $query) => $query->where('session_caisse_id', $filtres['session_caisse_id'])
+            )
+            ->when(
+                isset($filtres['statut']),
+                fn (Builder $query) => $query->whereIn('statut', $filtres['statut'])
+            )
+            ->when(
+                isset($filtres['date_debut']),
+                fn (Builder $query) => $query->where('date_heure', '>=', Carbon::parse($filtres['date_debut'])->startOfDay())
+            )
+            ->when(
+                isset($filtres['date_fin']),
+                fn (Builder $query) => $query->where('date_heure', '<=', Carbon::parse($filtres['date_fin'])->endOfDay())
             )
             ->orderByDesc('id')
-            ->get();
+            ->paginate($filtres['per_page'] ?? 50);
 
-        return ApiResponse::success(
-            ['commandes' => CommandeClientResource::collection($commandes)],
-            'Commandes client récupérées.'
-        );
+        return ApiResponse::success([
+            'commandes' => CommandeClientResource::collection($commandes->items()),
+            'pagination' => [
+                'total' => $commandes->total(),
+                'par_page' => $commandes->perPage(),
+                'page_courante' => $commandes->currentPage(),
+                'derniere_page' => $commandes->lastPage(),
+            ],
+        ], 'Commandes client récupérées.');
     }
 
     public function store(StoreCommandeClientRequest $request): JsonResponse
@@ -132,10 +177,19 @@ class CommandeClientController extends Controller
 
     /**
      * KDS : commandes envoyée_en_cuisine d'un PDV, avec leurs lignes actives.
-     * Pas d'autorisation au-delà de auth:sanctum (écran cuisine connecté).
+     *
+     * Gardé comme toute lecture de commandes, et borné au périmètre de site :
+     * l'écran est monté au mur d'une cuisine, il n'a aucune raison d'exposer
+     * la file d'un autre établissement. Le masquage côté front est un confort
+     * d'affichage, pas une protection — la route reste appelable directement.
      */
     public function kds(PointDeVente $point_de_vente): JsonResponse
     {
+        $this->authorize('viewAny', CommandeClient::class);
+
+        $point_de_vente->loadMissing('site');
+        SitePerimetre::resoudre(request()->user(), (int) $point_de_vente->site_id);
+
         $commandes = CommandeClient::query()
             ->where('statut', StatutCommandeClient::EnvoyeeEnCuisine->value)
             ->whereHas('table', fn (Builder $query) => $query->where('point_de_vente_id', $point_de_vente->id))

@@ -22,4 +22,19 @@ class TableSalleException extends RuntimeException
     {
         return new self("Impossible de supprimer la table (id: {$tableId}) : elle porte des commandes client.", 409);
     }
+
+    public static function archivageAvecCommandeEnCours(int $tableId): self
+    {
+        return new self("Impossible d'archiver la table (id: {$tableId}) : elle porte une commande en cours. Soldez ou annulez la commande d'abord.", 409);
+    }
+
+    public static function dejaArchivee(int $tableId): self
+    {
+        return new self("La table (id: {$tableId}) est déjà archivée.", 409);
+    }
+
+    public static function nonArchivee(int $tableId): self
+    {
+        return new self("La table (id: {$tableId}) n'est pas archivée.", 409);
+    }
 }

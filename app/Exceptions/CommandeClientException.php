@@ -24,6 +24,11 @@ class CommandeClientException extends RuntimeException
         return new self("La table (id: {$tableId}) doit être libre ou réservée pour ouvrir une commande.", 409);
     }
 
+    public static function tableArchivee(int $tableId): self
+    {
+        return new self("La table (id: {$tableId}) est archivée : réactivez-la pour y ouvrir une commande.", 409);
+    }
+
     public static function commandeActiveExistante(int $tableId): self
     {
         return new self("Une commande est déjà en cours sur la table (id: {$tableId}).", 409);

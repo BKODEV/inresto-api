@@ -52,6 +52,12 @@ class CommandeClientService
         /** @var SessionCaisse $session */
         $session = SessionCaisse::query()->with('caisse')->findOrFail($data['session_caisse_id']);
 
+        // Testé avant le statut : une table archivée peut être « libre », le
+        // message d'indisponibilité serait alors incompréhensible.
+        if ($table->estArchivee()) {
+            throw CommandeClientException::tableArchivee($table->id);
+        }
+
         if (! in_array($table->statut, [StatutTable::Libre, StatutTable::Reservee], true)) {
             throw CommandeClientException::tableIndisponible($table->id);
         }
@@ -79,6 +85,9 @@ class CommandeClientService
 
             $commande = new CommandeClient([
                 'table_id' => $table->id,
+                // Figé ici, jamais relu depuis la table : un renommage
+                // ultérieur ne doit pas réécrire les documents déjà imprimés.
+                'table_numero' => $table->numero,
                 'session_caisse_id' => $data['session_caisse_id'],
                 'reservation_id' => $data['reservation_id'] ?? null,
                 'appartement_id' => $data['appartement_id'] ?? null,
@@ -194,7 +203,7 @@ class CommandeClientService
      *
      * @throws CommandeClientException
      */
-    public function encaisser(CommandeClient $commande, string $_userId): CommandeClient
+    public function encaisser(CommandeClient $commande, string $userId): CommandeClient
     {
         if (! $commande->estServie()) {
             throw CommandeClientException::transitionInvalide($commande->statut, StatutCommandeClient::Encaissee);
@@ -206,8 +215,13 @@ class CommandeClientService
             throw CommandeClientException::resteAPayer($reste);
         }
 
-        return DB::transaction(function () use ($commande): CommandeClient {
+        return DB::transaction(function () use ($commande, $userId): CommandeClient {
             $commande->statut = StatutCommandeClient::Encaissee;
+            // Piste d'audit : les paiements portent déjà leur auteur, mais une
+            // note soldée sans aucun paiement (offerte, couverte par un avoir)
+            // n'en aurait aucun. La clôture doit donc être signée elle-même.
+            $commande->encaisse_par = $userId;
+            $commande->encaisse_le = now();
             $commande->save();
 
             $commande->loadMissing('table');

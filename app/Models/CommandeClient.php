@@ -26,6 +26,7 @@ class CommandeClient extends Model
 
     protected $fillable = [
         'table_id',
+        'table_numero',
         'session_caisse_id',
         'user_id',
         'reservation_id',
@@ -47,6 +48,7 @@ class CommandeClient extends Model
         'date_heure' => 'datetime',
         'montant_total' => 'decimal:2',
         'statut' => StatutCommandeClient::class,
+        'encaisse_le' => 'datetime',
     ];
 
     public function table(): BelongsTo
@@ -57,6 +59,15 @@ class CommandeClient extends Model
     public function sessionCaisse(): BelongsTo
     {
         return $this->belongsTo(SessionCaisse::class);
+    }
+
+    /**
+     * Qui a clôturé la note. Null pour les commandes encaissées avant
+     * l'introduction de la colonne, ou jamais encaissées.
+     */
+    public function encaissePar(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'encaisse_par');
     }
 
     public function user(): BelongsTo

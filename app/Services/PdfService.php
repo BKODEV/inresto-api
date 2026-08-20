@@ -196,9 +196,12 @@ class PdfService
 
         // Une table sans jeton n'a pas de QR imprimable : on l'omet plutôt que
         // de produire une case vide (`inresto:backfill-table-tokens` corrige).
+        // Une table archivée n'est plus en salle : imprimer son QR remettrait en
+        // circulation un autocollant qui ne sert plus aucun menu.
         $tables = TableSalle::query()
             ->where('point_de_vente_id', $pointDeVente->id)
             ->whereNotNull('public_token')
+            ->whereNull('archivee_le')
             ->orderBy('numero')
             ->get();
 

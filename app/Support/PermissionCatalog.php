@@ -25,6 +25,10 @@ final class PermissionCatalog
             'Utilisateurs & Rôles' => [
                 ...self::crud('utilisateur', 'les utilisateurs'),
                 ...self::crud('role', 'les rôles'),
+                // Lecture seule : le journal agrège des traces déjà écrites par
+                // les modules (annulations, remises, encaissements, impressions).
+                // Rien à créer ni modifier, donc pas de crud().
+                'journal.view' => "Consulter le journal d'activité",
             ],
             'Configuration' => [
                 // Ouvre la section Paramètres dans son ensemble, indépendamment

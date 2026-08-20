@@ -164,6 +164,26 @@ it('encaisse une commande soldée : statut encaissee, table à débarrasser', fu
         ->and($ctx->table->fresh()->statut)->toBe(StatutTable::ADebarrasser);
 });
 
+/**
+ * Les paiements portent déjà leur auteur, mais une note soldée sans aucun
+ * paiement (offerte, couverte par un avoir) n'en a aucun : sans signature de la
+ * clôture, plus personne ne sait qui a fermé la note.
+ */
+it('signe la clôture du nom de l\'encaisseur', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['commande_client.encaisser', 'paiement.create', 'session_caisse.utiliser']);
+    $commande = commandeServieAvecLigne($ctx, $user, 100, 1);
+    $mode = ModeDePaiement::factory()->create();
+    postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $mode->id, 'montant' => 100])->assertCreated();
+
+    expect($commande->fresh()->encaisse_par)->toBeNull();
+
+    postJson("/api/commandes-client/{$commande->id}/encaisser")->assertOk();
+
+    expect($commande->fresh()->encaisse_par)->toBe($user->id)
+        ->and($commande->fresh()->encaisse_le)->not->toBeNull();
+});
+
 // ───────────────────────── permissions ─────────────────────────
 
 it('refuse un paiement sans la permission paiement.create', function () {

@@ -42,7 +42,7 @@
 
     <div>{{ optional($commande->date_heure)->format('d/m/Y H:i') }}</div>
     @if ($commande->table)
-        <div>Table : {{ $commande->table->numero }}</div>
+        <div>Table : {{ $commande->table_numero ?? $commande->table->numero }}</div>
     @endif
     @if ($commande->user)
         <div>Serveur : {{ trim($commande->user->prenom.' '.$commande->user->nom) }}</div>

@@ -114,6 +114,24 @@ it('refuse une commande sur une table occupee (409)', function () {
     ])->assertStatus(409);
 });
 
+/**
+ * Une table archivée peut très bien être « libre » : sans ce contrôle en amont,
+ * le serveur recevrait le message d'indisponibilité de statut, incompréhensible
+ * pour une table qui n'est plus en salle.
+ */
+it('refuse une commande sur une table archivée (409)', function () {
+    $ctx = salleContext();
+    actingAsServeur($ctx->site);
+    $ctx->table->archivee_le = now();
+    $ctx->table->save();
+
+    postJson('/api/commandes-client', [
+        'table_id' => $ctx->table->id,
+        'session_caisse_id' => $ctx->session->id,
+    ])->assertStatus(409)
+        ->assertJsonPath('message', fn (string $message) => str_contains($message, 'archivée'));
+});
+
 it('refuse une commande sur une session fermée (422)', function () {
     $ctx = salleContext();
     actingAsServeur($ctx->site);
@@ -358,4 +376,166 @@ it('refuse la création si l\'utilisateur n\'est pas rattaché au site (403)', f
         'table_id' => $ctx->table->id,
         'session_caisse_id' => $ctx->session->id,
     ])->assertStatus(403);
+});
+
+/**
+ * Le numéro doit être copié à l'ouverture, pas relu à l'impression : c'est la
+ * copie qui protège les factures d'un renommage ultérieur de la table.
+ */
+it('fige le numéro de table à l\'ouverture de la commande', function () {
+    $ctx = salleContext();
+    actingAsServeur($ctx->site);
+    $ctx->table->update(['numero' => 'T07']);
+
+    $id = postJson('/api/commandes-client', [
+        'table_id' => $ctx->table->id,
+        'session_caisse_id' => $ctx->session->id,
+    ])->assertCreated()->json('data.id');
+
+    $ctx->table->update(['numero' => 'T12']);
+
+    expect(CommandeClient::find($id)->table_numero)->toBe('T07');
+});
+
+// ───────────────────────── index : filtres & pagination ─────────────────────────
+
+it('pagine l\'index et expose le total', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site);
+    CommandeClient::factory()->count(7)->create([
+        'table_id' => $ctx->table->id,
+        'session_caisse_id' => $ctx->session->id,
+        'user_id' => $user->id,
+    ]);
+
+    getJson('/api/commandes-client?per_page=3')
+        ->assertOk()
+        ->assertJsonCount(3, 'data.commandes')
+        ->assertJsonPath('data.pagination.total', 7)
+        ->assertJsonPath('data.pagination.derniere_page', 3);
+});
+
+/**
+ * Le filtre porte la charge : sans lui, l'écran de prise de commande
+ * retéléchargeait tout l'historique du restaurant toutes les vingt secondes.
+ */
+it('filtre par statuts vivants sans toucher à l\'historique', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site);
+    commandeSur($ctx, $user, 'ouverte');
+    commandeSur($ctx, $user, 'servie');
+    commandeSur($ctx, $user, 'encaissee');
+    commandeSur($ctx, $user, 'annulee');
+
+    getJson('/api/commandes-client?statut[]=ouverte&statut[]=envoyee_en_cuisine&statut[]=servie')
+        ->assertOk()
+        ->assertJsonCount(2, 'data.commandes');
+});
+
+it('filtre par point de vente sans charger celui d\'à côté', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site);
+    commandeSur($ctx, $user);
+
+    $autrePdv = PointDeVente::factory()->create(['site_id' => $ctx->site->id]);
+    $autreTable = TableSalle::factory()->create(['point_de_vente_id' => $autrePdv->id]);
+    CommandeClient::factory()->create([
+        'table_id' => $autreTable->id,
+        'session_caisse_id' => $ctx->session->id,
+        'user_id' => $user->id,
+    ]);
+
+    getJson("/api/commandes-client?point_de_vente_id={$ctx->pdv->id}")
+        ->assertOk()
+        ->assertJsonCount(1, 'data.commandes');
+});
+
+/**
+ * La journée d'un restaurant n'est pas une journée calendaire : un service qui
+ * dépasse minuit doit rester groupé. C'est la session de caisse qui la borne.
+ */
+it('filtre par session de caisse', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site);
+    commandeSur($ctx, $user);
+
+    // Une seule session ouverte par caisse : le service précédent est clos,
+    // ce qui est justement le cas d'usage — retrouver les commandes d'hier.
+    // `statut` n'est pas fillable : il n'appartient qu'au service de caisse.
+    $ctx->session->statut = StatutSessionCaisse::Fermee;
+    $ctx->session->ferme_le = now();
+    $ctx->session->save();
+    $autreSession = SessionCaisse::factory()->create(['caisse_id' => $ctx->caisse->id]);
+    CommandeClient::factory()->create([
+        'table_id' => $ctx->table->id,
+        'session_caisse_id' => $autreSession->id,
+        'user_id' => $user->id,
+    ]);
+
+    getJson("/api/commandes-client?session_caisse_id={$ctx->session->id}")
+        ->assertOk()
+        ->assertJsonCount(1, 'data.commandes');
+});
+
+it('refuse un statut inconnu plutôt que de renvoyer une salle déserte (422)', function () {
+    $ctx = salleContext();
+    actingAsServeur($ctx->site);
+
+    getJson('/api/commandes-client?statut[]=perdue')
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('statut.0');
+});
+
+it('borne l\'index au périmètre de sites de l\'utilisateur', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site);
+    commandeSur($ctx, $user);
+
+    // Commande d'un site auquel l'utilisateur n'est pas rattaché.
+    $autreSite = Site::factory()->create();
+    $autrePdv = PointDeVente::factory()->create(['site_id' => $autreSite->id]);
+    $autreTable = TableSalle::factory()->create(['point_de_vente_id' => $autrePdv->id]);
+    CommandeClient::factory()->create([
+        'table_id' => $autreTable->id,
+        'session_caisse_id' => $ctx->session->id,
+        'user_id' => $user->id,
+    ]);
+
+    getJson('/api/commandes-client')
+        ->assertOk()
+        ->assertJsonCount(1, 'data.commandes');
+});
+
+// ───────────────────────── KDS ─────────────────────────
+
+it('sert la file cuisine du point de vente', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site);
+    commandeSur($ctx, $user, 'envoyee_en_cuisine');
+    commandeSur($ctx, $user, 'ouverte');
+
+    getJson("/api/kds/{$ctx->pdv->id}")
+        ->assertOk()
+        ->assertJsonCount(1, 'data.commandes');
+});
+
+it('refuse le KDS sans la permission de lecture des commandes', function () {
+    $ctx = salleContext();
+    actingAsServeur($ctx->site, ['session_caisse.utiliser']);
+
+    getJson("/api/kds/{$ctx->pdv->id}")->assertForbidden();
+});
+
+/**
+ * L'écran est vissé au mur d'une cuisine : il n'a aucune raison d'exposer la
+ * file d'un autre établissement à qui connaît l'identifiant du point de vente.
+ */
+it('refuse le KDS d\'un point de vente hors périmètre', function () {
+    $ctx = salleContext();
+    actingAsServeur($ctx->site);
+
+    $autreSite = Site::factory()->create();
+    $autrePdv = PointDeVente::factory()->create(['site_id' => $autreSite->id]);
+
+    getJson("/api/kds/{$autrePdv->id}")->assertForbidden();
 });

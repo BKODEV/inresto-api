@@ -1,5 +1,5 @@
 <x-mail::message>
-# Bienvenue sur InResto
+# Bienvenue sur votre console de gestion
 
 Un compte vient d'être créé pour vous.
 
@@ -15,5 +15,5 @@ Se connecter
 Si vous n'êtes pas à l'origine de cette demande, ignorez simplement cet email.
 
 Cordialement,<br>
-L'équipe {{ config('app.name') }}
+L'équipe Innov Immobilier
 </x-mail::message>

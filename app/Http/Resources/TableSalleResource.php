@@ -20,6 +20,8 @@ class TableSalleResource extends JsonResource
             'numero' => $this->numero,
             'capacite' => $this->capacite,
             'statut' => $this->statut->value,
+            // Non nul = table retirée du service (hors plan de salle, QR éteint).
+            'archivee_le' => $this->archivee_le?->toIso8601String(),
             // Jeton + lien public du QR : destinés à l'ADMIN (affichage/impression
             // du QR sur le plan de tables), pas au client final.
             'public_token' => $this->public_token,
