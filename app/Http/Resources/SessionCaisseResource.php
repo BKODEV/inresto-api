@@ -50,6 +50,8 @@ class SessionCaisseResource extends JsonResource
                 'fermePar',
                 fn (): ?string => trim($this->fermePar->prenom.' '.$this->fermePar->nom),
             ),
+            // Renseigné = fermée sans que tout soit compté, et voici pourquoi.
+            'motif_forcage' => $this->motif_forcage,
             'notes' => $this->notes,
             // Un contenant par mode : le tiroir, le terminal, la pochette de
             // chèques. C'est la fermeture détaillée, dont `ecart` n'est que la

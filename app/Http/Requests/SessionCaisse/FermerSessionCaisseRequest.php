@@ -32,7 +32,34 @@ class FermerSessionCaisseRequest extends FormRequest
                 Rule::exists('modes_de_paiement', 'id'),
             ],
             'rapprochements.*.montant_constate' => ['nullable', 'numeric', 'min:0'],
+            // Passer outre le compte d'un contenant. Réservé à qui en a la
+            // permission : savoir fermer une caisse ne doit pas suffire à
+            // contourner le contrôle.
+            'forcer' => [
+                'sometimes',
+                'boolean',
+                Rule::prohibitedIf(fn (): bool => $this->user()->cannot('forcer', $this->route('session'))),
+            ],
+            // Un forçage sans explication ne vaut pas mieux qu'un trou : la
+            // trace n'a d'intérêt que si elle dit pourquoi.
+            'motif_forcage' => [
+                Rule::requiredIf(fn (): bool => $this->boolean('forcer')),
+                'nullable',
+                'string',
+                'max:500',
+            ],
             'notes' => ['nullable', 'string'],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'forcer.prohibited' => 'Vous n\'êtes pas autorisé à fermer une caisse sans tout compter.',
+            'motif_forcage.required' => 'Expliquez pourquoi la fermeture est forcée.',
         ];
     }
 }

@@ -408,3 +408,75 @@ it('refuse la lecture des soldes sans la permission', function () {
 
     getJson('/api/pourboires/soldes')->assertForbidden();
 });
+
+// ───────────────────────── suivi par le serveur ─────────────────────────
+
+/**
+ * `pourboire.suivre_les_siens` n'est attribuée à aucun rôle par défaut : c'est
+ * à la direction de décider si l'équipe suit ses cumuls. Sans elle, la porte
+ * reste fermée sans qu'aucun code ne change.
+ */
+it('refuse le suivi à un serveur qui n\'a pas la permission', function () {
+    $ctx = salleContext();
+    actingAsServeur($ctx->site, ['commande_client.view']);
+
+    getJson('/api/pourboires/mon-solde')->assertForbidden();
+});
+
+it('montre au serveur son propre solde, et rien d\'autre', function () {
+    $ctx = salleContext();
+    $serveur = actingAsServeur($ctx->site, [
+        'paiement.create', 'session_caisse.utiliser', 'pourboire.suivre_les_siens',
+    ]);
+    $mode = ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
+    $commande = commandeServieAvecLigne($ctx, $serveur, 5000, 1);
+    postJson("/api/commandes-client/{$commande->id}/paiements", [
+        'mode_de_paiement_id' => $mode->id, 'montant' => 5000, 'pourboire' => 900,
+    ])->assertCreated();
+
+    getJson('/api/pourboires/mon-solde')
+        ->assertOk()
+        ->assertJsonPath('data.solde.user_id', $serveur->id)
+        ->assertJsonPath('data.solde.encaisse', 900)
+        ->assertJsonPath('data.solde.solde', 900);
+});
+
+/**
+ * Ce qu'un serveur veut vraiment vérifier : non pas seulement combien on lui
+ * doit, mais quand on l'a payé et de combien.
+ */
+it('liste au serveur les reversements qu\'il a reçus', function () {
+    $ctx = salleContext();
+    $serveur = actingAsServeur($ctx->site, [
+        'paiement.create', 'session_caisse.utiliser', 'pourboire.suivre_les_siens',
+    ]);
+    $mode = ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
+    $commande = commandeServieAvecLigne($ctx, $serveur, 5000, 1);
+    postJson("/api/commandes-client/{$commande->id}/paiements", [
+        'mode_de_paiement_id' => $mode->id, 'montant' => 5000, 'pourboire' => 900,
+    ])->assertCreated();
+
+    Versement::factory()->auPersonnel($serveur)->create([
+        'caisse_id' => $ctx->caisse->id,
+        'session_caisse_id' => $ctx->session->id,
+        'montant' => 400,
+    ]);
+
+    getJson('/api/pourboires/mon-solde')
+        ->assertOk()
+        ->assertJsonPath('data.solde.reverse', 400)
+        ->assertJsonPath('data.solde.solde', 500)
+        ->assertJsonCount(1, 'data.reversements')
+        ->assertJsonPath('data.reversements.0.montant', 400);
+});
+
+it('ne laisse pas un serveur lire le solde d\'un collègue', function () {
+    // Aucun identifiant n'est accepté en paramètre : on ne lit que soi-même.
+    $ctx = salleContext();
+    $collegue = User::factory()->create();
+    $serveur = actingAsServeur($ctx->site, ['pourboire.suivre_les_siens']);
+
+    getJson("/api/pourboires/mon-solde?user_id={$collegue->id}")
+        ->assertOk()
+        ->assertJsonPath('data.solde.user_id', $serveur->id);
+});

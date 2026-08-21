@@ -80,6 +80,15 @@
         </tr>
     </table>
 
+    @if ($session->motif_forcage)
+        {{-- Fermée sans que tout soit compté. En tête du rapport et non en note
+             de bas de page : c'est la première chose qu'un responsable doit
+             voir en le relisant. --}}
+        <div class="sep"></div>
+        <div class="section">FERMETURE FORCÉE</div>
+        <div>{{ $session->motif_forcage }}</div>
+    @endif
+
     <div class="sep"></div>
 
     {{-- Le rapprochement, contenant par contenant. Un mode de paiement désigne

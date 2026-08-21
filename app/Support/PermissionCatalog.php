@@ -70,10 +70,15 @@ final class PermissionCatalog
                 'session_caisse.utiliser' => 'Utiliser une session de caisse',
                 ...self::crud('commande_client', 'les commandes client'),
                 'commande_client.encaisser' => 'Encaisser une commande client',
+                'session_caisse.forcer_fermeture' => 'Fermer une caisse sans que tout soit compté',
                 'versement.view' => 'Consulter les versements de caisse',
                 'versement.create' => 'Sortir de l\'argent du tiroir (coffre, banque, direction)',
                 'paiement.view' => 'Consulter les paiements',
                 'paiement.create' => 'Enregistrer des paiements',
+                // Volontairement absente de tous les rôles par défaut : c'est à
+                // la direction de décider si un serveur suit ses propres
+                // pourboires, et elle l'attribue ou la retire quand elle veut.
+                'pourboire.suivre_les_siens' => 'Suivre ses propres pourboires',
                 'remise.view' => 'Consulter les remises',
                 'remise.create' => 'Appliquer des remises',
                 'remise.autoriser_au_dela_seuil' => 'Autoriser une remise au-delà du seuil',

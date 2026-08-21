@@ -68,6 +68,57 @@ class PourboireService
     }
 
     /**
+     * Le solde d'une seule personne — ce qu'un serveur voit de lui-même.
+     *
+     * Passe par le même calcul que la vue d'ensemble : deux formules pour la
+     * même dette finiraient par diverger, et le serveur lirait un chiffre que
+     * la caisse ne reconnaît pas.
+     *
+     * @param  int[]|null  $siteIds
+     * @return array{user_id: string, serveur: string, encaisse: float, reverse: float, solde: float}
+     */
+    public function soldePour(string $userId, ?array $siteIds): array
+    {
+        foreach ($this->soldesParServeur($siteIds) as $ligne) {
+            if ($ligne['user_id'] === $userId) {
+                return $ligne;
+            }
+        }
+
+        return [
+            'user_id' => $userId,
+            'serveur' => '',
+            'encaisse' => 0.0,
+            'reverse' => 0.0,
+            'solde' => 0.0,
+        ];
+    }
+
+    /**
+     * Reversements déjà reçus par une personne, du plus récent au plus ancien.
+     *
+     * C'est ce qu'un serveur veut vérifier : non pas seulement combien on lui
+     * doit, mais quand on l'a payé et de combien.
+     *
+     * @return array<int, array{montant: float, date_heure: string|null, notes: string|null}>
+     */
+    public function reversementsRecusPar(string $userId): array
+    {
+        return Versement::query()
+            ->where('destination', DestinationVersement::Personnel->value)
+            ->where('beneficiaire_id', $userId)
+            ->orderByDesc('date_heure')
+            ->limit(50)
+            ->get()
+            ->map(fn (Versement $v): array => [
+                'montant' => round((float) $v->montant, 2),
+                'date_heure' => $v->date_heure?->toIso8601String(),
+                'notes' => $v->notes,
+            ])
+            ->all();
+    }
+
+    /**
      * Pourboires générés par les notes de chaque serveur. Le bénéficiaire est
      * `commandes_client.user_id` — celui qui tenait la note.
      *

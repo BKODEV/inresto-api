@@ -364,6 +364,87 @@ it('rattache le fonds initial au premier contenant en tiroir', function () {
         ->assertJsonPath('data.rapprochements.1.montant_theorique', '0.00');
 });
 
+// ───────────────────────── fermeture forcée ─────────────────────────
+
+/**
+ * La règle du compte par contenant est la bonne, mais une règle sans issue
+ * immobilise : un terminal qui refuse d'imprimer son ticket, et la caisse ne se
+ * ferme plus, donc le service suivant ne démarre pas. Le forçage est la porte
+ * de sortie, et elle est étroite — permission dédiée, motif écrit.
+ */
+it('laisse un responsable fermer sans tout compter, avec un motif', function () {
+    actingAsSessionUser(['session_caisse.update', 'session_caisse.forcer_fermeture']);
+    $session = SessionCaisse::factory()->create(['fonds_initial' => 0]);
+    $especes = ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
+    ModeDePaiement::factory()->horsTiroir()->create(['libelle' => 'Carte']);
+
+    postJson("/api/sessions-caisse/{$session->id}/fermer", [
+        'forcer' => true,
+        'motif_forcage' => 'Le terminal ne sort pas son ticket.',
+        'rapprochements' => [
+            ['mode_de_paiement_id' => $especes->id, 'montant_constate' => 0],
+        ],
+    ])
+        ->assertOk()
+        ->assertJsonPath('data.statut', 'fermee')
+        ->assertJsonPath('data.motif_forcage', 'Le terminal ne sort pas son ticket.')
+        // Le contenant non compté reste non rapproché : on n'invente pas d'écart.
+        ->assertJsonPath('data.rapprochements.1.montant_constate', null)
+        ->assertJsonPath('data.rapprochements.1.ecart_sens', 'non_rapproche');
+});
+
+it('refuse le forçage à qui n\'en a pas la permission (422)', function () {
+    // Savoir fermer une caisse ne doit pas suffire à contourner le contrôle.
+    actingAsSessionUser(['session_caisse.update']);
+    $session = SessionCaisse::factory()->create(['fonds_initial' => 0]);
+    ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
+
+    postJson("/api/sessions-caisse/{$session->id}/fermer", [
+        'forcer' => true,
+        'motif_forcage' => 'Parce que.',
+    ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('forcer');
+
+    expect($session->fresh()->estOuverte())->toBeTrue();
+});
+
+it('exige un motif pour forcer (422)', function () {
+    // Un forçage sans explication ne vaut pas mieux qu'un trou.
+    actingAsSessionUser(['session_caisse.update', 'session_caisse.forcer_fermeture']);
+    $session = SessionCaisse::factory()->create(['fonds_initial' => 0]);
+    ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
+
+    postJson("/api/sessions-caisse/{$session->id}/fermer", ['forcer' => true])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('motif_forcage');
+});
+
+/**
+ * Le forçage passe outre le COMPTE, jamais l'impayé : une note servie non
+ * réglée se solde ou s'annule, elle ne se contourne pas.
+ */
+it('ne contourne pas une note servie non réglée (409)', function () {
+    actingAsSessionUser(['session_caisse.update', 'session_caisse.forcer_fermeture']);
+    $session = SessionCaisse::factory()->create(['fonds_initial' => 0]);
+    CommandeClient::factory()->servie()->create(['session_caisse_id' => $session->id]);
+
+    postJson("/api/sessions-caisse/{$session->id}/fermer", [
+        'forcer' => true,
+        'motif_forcage' => 'Le terminal est en panne.',
+    ])->assertStatus(409);
+});
+
+it('ne marque pas forcée une fermeture ordinaire', function () {
+    actingAsSessionUser(['session_caisse.update', 'session_caisse.forcer_fermeture']);
+    $session = SessionCaisse::factory()->create(['fonds_initial' => 0]);
+    ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
+
+    postJson("/api/sessions-caisse/{$session->id}/fermer", tiroirCompte(0))
+        ->assertOk()
+        ->assertJsonPath('data.motif_forcage', null);
+});
+
 // ───────────────────────── notes en suspens ─────────────────────────
 
 /**

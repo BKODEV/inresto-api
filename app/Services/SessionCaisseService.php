@@ -208,7 +208,7 @@ class SessionCaisseService
      * Ferme une session ouverte : fige montant_theorique, montant_reel, ecart et
      * ferme_le. Seule une session ouverte peut être fermée (409 sinon).
      *
-     * @param  array{rapprochements?: array<int, array{mode_de_paiement_id: int, montant_constate?: float|string|null}>, notes?: string|null}  $data
+     * @param  array{rapprochements?: array<int, array{mode_de_paiement_id: int, montant_constate?: float|string|null}>, forcer?: bool, motif_forcage?: string|null, notes?: string|null}  $data
      * @param  string|null  $userId  Signataire de la fermeture.
      *
      * @throws SessionCaisseException
@@ -230,7 +230,11 @@ class SessionCaisseService
             throw SessionCaisseException::notesNonReglees($session->id, $impayees->count());
         }
 
-        $this->assertTousLesContenantsComptes($session, $data['rapprochements'] ?? []);
+        // Le forçage passe outre le compte, jamais l'impayé : une note servie
+        // non réglée reste bloquante, elle se solde ou s'annule.
+        if (! ($data['forcer'] ?? false)) {
+            $this->assertTousLesContenantsComptes($session, $data['rapprochements'] ?? []);
+        }
 
         return DB::transaction(function () use ($session, $data, $userId): SessionCaisse {
             $tiroir = $this->figerRapprochements($session, $data['rapprochements'] ?? []);
@@ -245,6 +249,9 @@ class SessionCaisseService
             // Le geste de fermeture fige l'écart : le signer complète la piste
             // d'audit, `user_id` ne désignant que l'ouverture.
             $session->ferme_par = $userId;
+            // Renseigné = la fermeture a été forcée. Les contenants non comptés
+            // restent « non rapprochés », sans écart inventé.
+            $session->motif_forcage = ($data['forcer'] ?? false) ? $data['motif_forcage'] : null;
             $session->statut = StatutSessionCaisse::Fermee;
 
             if (array_key_exists('notes', $data)) {

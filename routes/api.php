@@ -202,6 +202,8 @@ Route::middleware('auth:sanctum')->group(function () {
         ->name('sessions-caisse.fermer');
     Route::get('pourboires/soldes', [PourboireController::class, 'soldes'])
         ->name('pourboires.soldes');
+    Route::get('pourboires/mon-solde', [PourboireController::class, 'monSolde'])
+        ->name('pourboires.mon-solde');
     Route::get('caisses/{caisse}/versements', [VersementController::class, 'index'])
         ->name('caisses.versements.index');
     Route::post('caisses/{caisse}/versements', [VersementController::class, 'store'])

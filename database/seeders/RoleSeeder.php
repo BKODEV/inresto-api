@@ -69,6 +69,7 @@ class RoleSeeder extends Seeder
                     ...$this->crud('carte_produit'),
                     ...$this->crud('table'),
                     ...$this->crud('session_caisse'), 'session_caisse.utiliser',
+                    'session_caisse.forcer_fermeture',
                     ...$this->crud('commande_client'), 'commande_client.encaisser',
                     'paiement.view', 'paiement.create',
                     'versement.view', 'versement.create',

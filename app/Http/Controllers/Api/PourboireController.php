@@ -33,4 +33,28 @@ class PourboireController extends Controller
             'Soldes de pourboires récupérés.'
         );
     }
+
+    /**
+     * Ce qu'un serveur voit de ses PROPRES pourboires.
+     *
+     * Gardé par `pourboire.suivre_les_siens`, volontairement absente de tous les
+     * rôles par défaut : c'est à la direction de décider si l'équipe suit ses
+     * cumuls, et elle attribue ou retire la permission quand elle veut, sans
+     * qu'aucun code ne change.
+     *
+     * Aucun identifiant n'est accepté en paramètre : on ne lit que soi-même, et
+     * le périmètre de sites de l'utilisateur borne le reste.
+     */
+    public function monSolde(Request $request): JsonResponse
+    {
+        abort_unless($request->user()->can('pourboire.suivre_les_siens'), 403);
+
+        $userId = $request->user()->id;
+        $sites = SitePerimetre::resoudre($request->user(), null);
+
+        return ApiResponse::success([
+            'solde' => $this->service->soldePour($userId, $sites),
+            'reversements' => $this->service->reversementsRecusPar($userId),
+        ], 'Solde de pourboires récupéré.');
+    }
 }
