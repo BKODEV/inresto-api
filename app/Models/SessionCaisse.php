@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\Statut;
 use App\Enums\StatutCommandeClient;
 use App\Enums\StatutSessionCaisse;
 use Database\Factories\SessionCaisseFactory;
@@ -135,6 +136,53 @@ class SessionCaisse extends Model
         return $this->sommePaiements(true);
     }
 
+    /** Rapprochements figés à la fermeture, un par mode de paiement actif. */
+    public function rapprochements(): HasMany
+    {
+        return $this->hasMany(RapprochementCaisse::class, 'session_caisse_id');
+    }
+
+    /**
+     * Ce que chaque contenant devrait contenir, mode par mode.
+     *
+     * Tous les modes ACTIFS y figurent, y compris ceux qui n'ont rien encaissé :
+     * une carte passée sur le terminal sans note ouverte doit avoir une ligne où
+     * apparaître, sinon l'erreur reste invisible.
+     *
+     * Le fonds initial est de l'argent liquide : il revient au premier mode en
+     * tiroir, dans l'ordre d'affichage — « Espèces » en pratique. Le rattacher à
+     * un mode plutôt qu'au tiroir en bloc permet de comparer chaque contenant à
+     * ce qu'on y compte, le caissier ne pouvant pas séparer le fonds du reste
+     * des espèces qu'il a en main.
+     *
+     * @return array<int, array{mode: ModeDePaiement, theorique: float}>
+     */
+    public function theoriqueParMode(): array
+    {
+        $modes = ModeDePaiement::query()
+            ->where('statut', Statut::Actif->value)
+            ->orderBy('ordre')
+            ->orderBy('id')
+            ->get();
+
+        $encaisse = Paiement::query()
+            ->whereHas('commande', fn ($query) => $query->where('session_caisse_id', $this->id))
+            ->groupBy('mode_de_paiement_id')
+            ->selectRaw('mode_de_paiement_id, SUM(montant + pourboire) as total')
+            ->pluck('total', 'mode_de_paiement_id');
+
+        $porteurDuFonds = $modes->first(fn (ModeDePaiement $mode): bool => $mode->compte_en_caisse)?->id;
+
+        return $modes->map(fn (ModeDePaiement $mode): array => [
+            'mode' => $mode,
+            'theorique' => round(
+                (float) ($encaisse[$mode->id] ?? 0)
+                + ($mode->id === $porteurDuFonds ? (float) $this->fonds_initial : 0.0),
+                2
+            ),
+        ])->all();
+    }
+
     /**
      * Le complément : encaissé sur la session, mais jamais passé par le tiroir.
      * Sert à expliquer, à la fermeture, l'écart entre ce qui a été encaissé et
@@ -155,10 +203,16 @@ class SessionCaisse extends Model
      *
      * @param  float  $tolerance  Montant sous lequel l'écart est réputé normal.
      *                            0 = règle désactivée.
-     * @return 'juste'|'tolere'|'excedent'|'manquant'
+     * @return 'non_rapproche'|'juste'|'tolere'|'excedent'|'manquant'
      */
     public function sensEcart(float $tolerance = 0.0): string
     {
+        // Personne n'a compté le tiroir : on n'a rien à qualifier. Renvoyer
+        // « juste » laisserait croire à une vérification qui n'a pas eu lieu.
+        if ($this->ecart === null) {
+            return 'non_rapproche';
+        }
+
         $ecart = round((float) $this->ecart, 2);
 
         if ($ecart === 0.0) {

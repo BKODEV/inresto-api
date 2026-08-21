@@ -400,8 +400,12 @@ function sessionFermeeAvecVentes(): SessionCaisse
         'pourboire' => 0,
     ]);
 
-    // Fonds 10 000 + 6 000 d'espèces + 1 000 de pourboire = 17 000 attendus.
-    return app(SessionCaisseService::class)->fermer($session, ['montant_reel' => 17000]);
+    // Fonds 10 000 + 6 000 d'espèces + 1 000 de pourboire = 17 000 attendus dans
+    // le tiroir. Le virement n'est pas rapproché : il arrive à la banque quand
+    // il arrive.
+    return app(SessionCaisseService::class)->fermer($session, ['rapprochements' => [
+        ['mode_de_paiement_id' => $especes->id, 'montant_constate' => 17000],
+    ]]);
 }
 
 it('génère le rapport de fermeture en PDF', function () {
@@ -413,21 +417,35 @@ it('génère le rapport de fermeture en PDF', function () {
         ->assertHeader('content-type', 'application/pdf');
 });
 
-it('sépare le tiroir, le hors tiroir et le chiffre d\'affaires sur le rapport', function () {
+it('rapproche chaque contenant et isole le chiffre d\'affaires', function () {
     $session = sessionFermeeAvecVentes();
 
     $html = app(PdfService::class)->htmlRapportFermeture($session);
 
     expect($html)
         ->toContain('RAPPORT DE FERMETURE')
-        ->toContain('EN TIROIR')
-        ->toContain('HORS TIROIR')
+        ->toContain('RAPPROCHEMENT')
         // CA = les lignes (2 × 3 000), ni le pourboire ni le mode n'y entrent.
         ->toContain('6 000 XOF')
-        // Théorique = fonds + espèces + pourboire.
+        // Théorique du tiroir = fonds + espèces + pourboire, et il tombe juste.
         ->toContain('17 000 XOF')
-        ->toContain('Virement')
+        ->toContain('ÉCART DE CAISSE')
         ->toContain('Caisse juste');
+});
+
+/**
+ * Le virement n'est pas vérifiable le soir même. Le rapport le dit au lieu
+ * d'afficher un zéro qui laisserait croire à un contrôle qui n'a pas eu lieu.
+ */
+it('marque « non rapproché » le contenant que personne n\'a déclaré', function () {
+    $session = sessionFermeeAvecVentes();
+
+    $html = app(PdfService::class)->htmlRapportFermeture($session);
+
+    expect($html)
+        ->toContain('Virement')
+        ->toContain('hors tiroir')
+        ->toContain('Non rapproché');
 });
 
 it('liste les pourboires à reverser, par serveur', function () {

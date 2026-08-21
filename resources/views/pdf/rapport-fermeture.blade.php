@@ -5,9 +5,13 @@
     $devise = $parametre?->devise;
     $caisse = $session->caisse;
 
-    // Ce qui reste dans le tiroir, ventilé, et ce qui n'y passe jamais.
-    $enTiroir = collect($rapport['modes'])->filter(fn (array $m): bool => $m['compte_en_caisse']);
-    $horsTiroir = collect($rapport['modes'])->reject(fn (array $m): bool => $m['compte_en_caisse']);
+    $sens = [
+        'non_rapproche' => 'non rapproché',
+        'juste' => 'juste',
+        'tolere' => 'toléré',
+        'excedent' => 'excédent',
+        'manquant' => 'manquant',
+    ];
 
     $libelleEcart = [
         'juste' => 'Caisse juste',
@@ -78,54 +82,58 @@
 
     <div class="sep"></div>
 
-    {{-- Le rapprochement proprement dit : ce que le tiroir devait contenir face
-         à ce qu'on y a compté. --}}
-    <div class="section">EN TIROIR</div>
-    <table>
-        <tr>
-            <td>Fonds initial</td>
-            <td class="num">{{ Devise::formater((float) $session->fonds_initial, $devise) }}</td>
-        </tr>
-        @foreach ($enTiroir as $mode)
-            <tr>
-                <td>{{ $mode['mode'] }}</td>
-                <td class="num">{{ Devise::formater($mode['montant'], $devise) }}</td>
+    {{-- Le rapprochement, contenant par contenant. Un mode de paiement désigne
+         un endroit où l'argent s'accumule : le tiroir, le terminal, la pochette
+         de chèques. Chacun se compare à ce qu'on y constate. --}}
+    <div class="section">RAPPROCHEMENT</div>
+    @foreach ($rapport['rapprochements'] as $ligne)
+        <table>
+            <tr class="bold">
+                <td colspan="2">
+                    {{ $ligne->modePaiement?->libelle ?? 'Mode supprimé' }}
+                    @unless ($ligne->modePaiement?->compte_en_caisse)
+                        <span class="muted">(hors tiroir)</span>
+                    @endunless
+                </td>
             </tr>
-            @if ($mode['pourboire'] > 0)
+            <tr>
+                <td>Théorique</td>
+                <td class="num">{{ Devise::formater((float) $ligne->montant_theorique, $devise) }}</td>
+            </tr>
+            @if ($ligne->estRapproche())
                 <tr>
-                    <td class="muted">&nbsp;&nbsp;dont pourboires</td>
-                    <td class="num muted">{{ Devise::formater($mode['pourboire'], $devise) }}</td>
+                    <td>Constaté</td>
+                    <td class="num">{{ Devise::formater((float) $ligne->montant_constate, $devise) }}</td>
+                </tr>
+                <tr class="total">
+                    <td>{{ $sens[$ligne->sensEcart($rapport['tolerance'])] ?? '' }}</td>
+                    <td class="num">{{ Devise::formater((float) $ligne->ecart, $devise) }}</td>
+                </tr>
+            @else
+                {{-- Un virement arrive à la banque quand il arrive : rien à
+                     constater ce soir, et on n'invente pas d'écart. --}}
+                <tr>
+                    <td colspan="2" class="muted">Non rapproché</td>
                 </tr>
             @endif
-        @endforeach
+        </table>
+        <div class="sep"></div>
+    @endforeach
+
+    {{-- L'écart de caisse au sens strict : la part tiroir, fonds compris. --}}
+    <table>
         <tr class="total">
-            <td>THÉORIQUE</td>
-            <td class="num">{{ Devise::formater((float) $session->montant_theorique, $devise) }}</td>
-        </tr>
-        <tr>
-            <td>Compté</td>
-            <td class="num">{{ Devise::formater((float) $session->montant_reel, $devise) }}</td>
-        </tr>
-        <tr class="total">
-            <td>{{ $libelleEcart }}</td>
-            <td class="num">{{ Devise::formater((float) $session->ecart, $devise) }}</td>
+            <td>ÉCART DE CAISSE</td>
+            <td class="num">
+                @if ($session->ecart === null)
+                    non rapproché
+                @else
+                    {{ Devise::formater((float) $session->ecart, $devise) }} {{ $libelleEcart }}
+                @endif
+            </td>
         </tr>
     </table>
 
-    @if ($horsTiroir->isNotEmpty())
-        <div class="sep"></div>
-        {{-- Encaissé, mais jamais dans la main du caissier : c'est ce qui
-             explique qu'un tiroir presque vide puisse être juste. --}}
-        <div class="section">HORS TIROIR</div>
-        <table>
-            @foreach ($horsTiroir as $mode)
-                <tr>
-                    <td>{{ $mode['mode'] }}</td>
-                    <td class="num">{{ Devise::formater($mode['montant'], $devise) }}</td>
-                </tr>
-            @endforeach
-        </table>
-    @endif
 
     @if (! empty($rapport['pourboires_par_serveur']))
         <div class="sep"></div>

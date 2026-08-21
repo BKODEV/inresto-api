@@ -22,7 +22,11 @@ class SessionCaisseController extends Controller
      * La fiche d'établissement remonte jusqu'ici pour la tolérance d'écart :
      * {@see SessionCaisseResource} la lit sans déclencher de requête.
      */
-    private const RELATIONS = ['caisse.pointDeVente.site.parametreEtablissement', 'user'];
+    private const RELATIONS = [
+        'caisse.pointDeVente.site.parametreEtablissement',
+        'user',
+        'rapprochements.modePaiement',
+    ];
 
     public function __construct(private readonly SessionCaisseService $service) {}
 

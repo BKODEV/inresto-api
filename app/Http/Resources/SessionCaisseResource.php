@@ -47,6 +47,12 @@ class SessionCaisseResource extends JsonResource
                 fn (): ?string => trim($this->fermePar->prenom.' '.$this->fermePar->nom),
             ),
             'notes' => $this->notes,
+            // Un contenant par mode : le tiroir, le terminal, la pochette de
+            // chèques. C'est la fermeture détaillée, dont `ecart` n'est que la
+            // part tiroir.
+            'rapprochements' => RapprochementCaisseResource::collection(
+                $this->whenLoaded('rapprochements'),
+            ),
             'caisse' => new CaisseResource($this->whenLoaded('caisse')),
             'user' => $this->whenLoaded('user', fn () => [
                 'id' => $this->user->id,

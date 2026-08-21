@@ -33,7 +33,7 @@ class RapportFermetureService
      */
     public function pour(SessionCaisse $session): array
     {
-        $session->loadMissing(['caisse.pointDeVente.site', 'user', 'fermePar']);
+        $session->loadMissing(['caisse.pointDeVente.site', 'user', 'fermePar', 'rapprochements.modePaiement']);
 
         $tolerance = (float) ($session->caisse?->pointDeVente?->site?->parametreEtablissement
             ?->tolerance_ecart_caisse ?? 0);
@@ -45,6 +45,12 @@ class RapportFermetureService
             'notes_encaissees' => $this->nombreNotesEncaissees($session),
             'chiffre_affaires' => $this->chiffreAffaires($session),
             'modes' => $this->encaisseParMode($session),
+            'rapprochements' => $session->rapprochements()
+                ->with('modePaiement')
+                ->get()
+                ->sortByDesc(fn ($r): bool => (bool) $r->modePaiement?->compte_en_caisse)
+                ->values()
+                ->all(),
             'total_pourboires' => $session->totalPourboires(),
             'pourboires_par_serveur' => $session->pourboiresParServeur(),
             'gestes' => $this->gestesSensibles($session),

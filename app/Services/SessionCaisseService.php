@@ -70,6 +70,41 @@ class SessionCaisseService
     }
 
     /**
+     * Fige un rapprochement par mode de paiement actif, et renvoie le total
+     * constaté dans le TIROIR — ou null si personne n'y a rien compté.
+     *
+     * Le théorique de chaque contenant est gelé ici : un rapprochement est une
+     * pièce d'audit, il ne se recalcule pas après coup.
+     *
+     * @param  array<int, array{mode_de_paiement_id: int, montant_constate?: float|string|null}>  $declares
+     */
+    private function figerRapprochements(SessionCaisse $session, array $declares): ?float
+    {
+        $parMode = collect($declares)->keyBy('mode_de_paiement_id');
+
+        $tiroir = null;
+
+        foreach ($session->theoriqueParMode() as $ligne) {
+            $mode = $ligne['mode'];
+            $declare = $parMode->get($mode->id)['montant_constate'] ?? null;
+            $constate = $declare === null ? null : round((float) $declare, 2);
+
+            $session->rapprochements()->create([
+                'mode_de_paiement_id' => $mode->id,
+                'montant_theorique' => $ligne['theorique'],
+                'montant_constate' => $constate,
+                'ecart' => $constate === null ? null : round($constate - $ligne['theorique'], 2),
+            ]);
+
+            if ($mode->compte_en_caisse && $constate !== null) {
+                $tiroir = round(($tiroir ?? 0.0) + $constate, 2);
+            }
+        }
+
+        return $tiroir;
+    }
+
+    /**
      * Reprend les notes encore en service laissées par la session précédente.
      *
      * Une table qui mange encore à l'heure de la relève ne doit ni bloquer la
@@ -107,7 +142,7 @@ class SessionCaisseService
      * Ferme une session ouverte : fige montant_theorique, montant_reel, ecart et
      * ferme_le. Seule une session ouverte peut être fermée (409 sinon).
      *
-     * @param  array{montant_reel: float|string, notes?: string|null}  $data
+     * @param  array{rapprochements?: array<int, array{mode_de_paiement_id: int, montant_constate?: float|string|null}>, notes?: string|null}  $data
      * @param  string|null  $userId  Signataire de la fermeture.
      *
      * @throws SessionCaisseException
@@ -130,12 +165,14 @@ class SessionCaisseService
         }
 
         return DB::transaction(function () use ($session, $data, $userId): SessionCaisse {
-            $montantTheorique = (float) $session->fonds_initial + $session->montantEnCaisse();
-            $montantReel = (float) $data['montant_reel'];
+            $tiroir = $this->figerRapprochements($session, $data['rapprochements'] ?? []);
 
-            $session->montant_theorique = $montantTheorique;
-            $session->montant_reel = $montantReel;
-            $session->ecart = $montantReel - $montantTheorique;
+            $session->montant_theorique = (float) $session->fonds_initial + $session->montantEnCaisse();
+            // Null et non zéro quand rien n'a été constaté dans le tiroir :
+            // annoncer un manquant égal à la recette du service parce que
+            // personne n'a compté serait pire que de ne rien annoncer.
+            $session->montant_reel = $tiroir;
+            $session->ecart = $tiroir === null ? null : $tiroir - $session->montant_theorique;
             $session->ferme_le = now();
             // Le geste de fermeture fige l'écart : le signer complète la piste
             // d'audit, `user_id` ne désignant que l'ouverture.
@@ -152,7 +189,12 @@ class SessionCaisseService
             // `ecart_sens` renvoyé juste après la fermeture serait calculé avec
             // une tolérance de 0, et annoncerait « manquant » là où le site
             // tolère l'écart. Même chaîne que SessionCaisseController::RELATIONS.
-            return $session->load(['caisse.pointDeVente.site.parametreEtablissement', 'user', 'fermePar']);
+            return $session->load([
+                'caisse.pointDeVente.site.parametreEtablissement',
+                'user',
+                'fermePar',
+                'rapprochements.modePaiement',
+            ]);
         });
     }
 }

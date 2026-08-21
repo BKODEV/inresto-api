@@ -33,6 +33,21 @@ function actingAsSessionUser(array $permissions = []): User
     return $user;
 }
 
+/**
+ * Le constaté de fermeture s'exprime désormais par CONTENANT : un montant par
+ * mode de paiement. Ce helper pose le cas courant — le seul tiroir, compté.
+ *
+ * @return array<string, mixed>
+ */
+function tiroirCompte(float $montant, ?ModeDePaiement $mode = null): array
+{
+    $mode ??= ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
+
+    return ['rapprochements' => [
+        ['mode_de_paiement_id' => $mode->id, 'montant_constate' => $montant],
+    ]];
+}
+
 // ───────────────────────── ouverture ─────────────────────────
 
 it('ouvre une session de caisse', function () {
@@ -74,7 +89,7 @@ it('ferme une session : statut fermee, ecart calculé, ferme_le renseigné', fun
     actingAsSessionUser(['session_caisse.update']);
     $session = SessionCaisse::factory()->create(['fonds_initial' => 100]);
 
-    postJson("/api/sessions-caisse/{$session->id}/fermer", ['montant_reel' => 150])
+    postJson("/api/sessions-caisse/{$session->id}/fermer", tiroirCompte(150))
         ->assertOk()
         ->assertJsonPath('data.statut', 'fermee')
         ->assertJsonPath('data.montant_theorique', '100.00') // fonds_initial + paiements (0)
@@ -88,7 +103,7 @@ it('calcule montant_theorique = fonds_initial (paiements = 0 pour l\'instant)', 
     actingAsSessionUser(['session_caisse.update']);
     $session = SessionCaisse::factory()->create(['fonds_initial' => 75]);
 
-    postJson("/api/sessions-caisse/{$session->id}/fermer", ['montant_reel' => 75])
+    postJson("/api/sessions-caisse/{$session->id}/fermer", tiroirCompte(75))
         ->assertOk()
         ->assertJsonPath('data.montant_theorique', '75.00')
         ->assertJsonPath('data.ecart', '0.00');
@@ -118,7 +133,7 @@ it('ne compte dans le théorique que les paiements qui passent par le tiroir', f
 
     // Le caissier compte 250 : le fonds plus les seules espèces. Les 300 du
     // virement sont encaissés, mais pas dans sa main.
-    postJson("/api/sessions-caisse/{$session->id}/fermer", ['montant_reel' => 250])
+    postJson("/api/sessions-caisse/{$session->id}/fermer", tiroirCompte(250))
         ->assertOk()
         ->assertJsonPath('data.montant_theorique', '250.00')
         ->assertJsonPath('data.ecart', '0.00');
@@ -136,7 +151,7 @@ it('expose ce qui a été encaissé hors du tiroir', function () {
 
     // Sans ce chiffre, l'écart nul d'une caisse vide reste incompréhensible :
     // on a encaissé 300 et le tiroir est vide, à juste titre.
-    postJson("/api/sessions-caisse/{$session->id}/fermer", ['montant_reel' => 0])
+    postJson("/api/sessions-caisse/{$session->id}/fermer", tiroirCompte(0))
         ->assertOk()
         ->assertJsonPath('data.montant_hors_caisse', '300.00');
 });
@@ -150,7 +165,7 @@ it('qualifie le sens de l\'écart', function (float $reel, string $attendu) {
     actingAsSessionUser(['session_caisse.update']);
     $session = SessionCaisse::factory()->create(['fonds_initial' => 100]);
 
-    postJson("/api/sessions-caisse/{$session->id}/fermer", ['montant_reel' => $reel])
+    postJson("/api/sessions-caisse/{$session->id}/fermer", tiroirCompte($reel))
         ->assertOk()
         ->assertJsonPath('data.ecart_sens', $attendu);
 })->with([
@@ -171,7 +186,7 @@ it('classe un petit écart comme toléré quand le site en définit une', functi
         'tolerance_ecart_caisse' => 500,
     ]);
 
-    postJson("/api/sessions-caisse/{$session->id}/fermer", ['montant_reel' => 300])
+    postJson("/api/sessions-caisse/{$session->id}/fermer", tiroirCompte(300))
         ->assertOk()
         ->assertJsonPath('data.ecart', '200.00')
         ->assertJsonPath('data.ecart_sens', 'tolere');
@@ -186,7 +201,7 @@ it('classe la borne exacte de la tolérance comme tolérée', function () {
     ]);
 
     // 600 - 100 = 500 pile : la tolérance est inclusive.
-    postJson("/api/sessions-caisse/{$session->id}/fermer", ['montant_reel' => 600])
+    postJson("/api/sessions-caisse/{$session->id}/fermer", tiroirCompte(600))
         ->assertOk()
         ->assertJsonPath('data.ecart_sens', 'tolere');
 });
@@ -199,7 +214,7 @@ it('signale au-delà de la tolérance, dans les deux sens', function () {
         'tolerance_ecart_caisse' => 500,
     ]);
 
-    postJson("/api/sessions-caisse/{$session->id}/fermer", ['montant_reel' => 400])
+    postJson("/api/sessions-caisse/{$session->id}/fermer", tiroirCompte(400))
         ->assertOk()
         ->assertJsonPath('data.ecart_sens', 'manquant');
 });
@@ -216,9 +231,141 @@ it('sans tolérance configurée, le moindre écart est signalé', function () {
         'tolerance_ecart_caisse' => 0,
     ]);
 
-    postJson("/api/sessions-caisse/{$session->id}/fermer", ['montant_reel' => 101])
+    postJson("/api/sessions-caisse/{$session->id}/fermer", tiroirCompte(101))
         ->assertOk()
         ->assertJsonPath('data.ecart_sens', 'excedent');
+});
+
+// ───────────────────────── rapprochement par contenant ─────────────────────────
+
+/**
+ * Un mode de paiement désigne un contenant : le tiroir, le terminal, la
+ * pochette. Chacun se rapproche du sien, et l'écart de caisse ne porte plus que
+ * sur le tiroir.
+ */
+it('rapproche chaque contenant séparément', function () {
+    actingAsSessionUser(['session_caisse.update']);
+    $session = SessionCaisse::factory()->create(['fonds_initial' => 10000]);
+    $commande = CommandeClient::factory()->create(['session_caisse_id' => $session->id]);
+
+    $especes = ModeDePaiement::factory()->create(['libelle' => 'Espèces', 'ordre' => 1]);
+    $carte = ModeDePaiement::factory()->horsTiroir()->create(['libelle' => 'Carte', 'ordre' => 2]);
+
+    Paiement::factory()->create([
+        'commande_client_id' => $commande->id, 'mode_de_paiement_id' => $especes->id, 'montant' => 174000,
+    ]);
+    Paiement::factory()->create([
+        'commande_client_id' => $commande->id, 'mode_de_paiement_id' => $carte->id, 'montant' => 80000,
+    ]);
+
+    // Le tiroir est court de 500 ; le terminal tombe pile.
+    postJson("/api/sessions-caisse/{$session->id}/fermer", ['rapprochements' => [
+        ['mode_de_paiement_id' => $especes->id, 'montant_constate' => 183500],
+        ['mode_de_paiement_id' => $carte->id, 'montant_constate' => 80000],
+    ]])
+        ->assertOk()
+        // L'écart de caisse ne porte que sur le tiroir : fonds + espèces.
+        ->assertJsonPath('data.montant_theorique', '184000.00')
+        ->assertJsonPath('data.montant_reel', '183500.00')
+        ->assertJsonPath('data.ecart', '-500.00')
+        ->assertJsonPath('data.rapprochements.0.mode', 'Espèces')
+        ->assertJsonPath('data.rapprochements.0.ecart', '-500.00')
+        ->assertJsonPath('data.rapprochements.1.mode', 'Carte')
+        ->assertJsonPath('data.rapprochements.1.ecart', '0.00');
+});
+
+/**
+ * L'erreur que rien ne voyait : une transaction tapée sur le terminal sans note
+ * ouverte. Elle ne touche pas le tiroir, donc l'écart de caisse reste nul.
+ */
+it('révèle une transaction du terminal absente du système', function () {
+    actingAsSessionUser(['session_caisse.update']);
+    $session = SessionCaisse::factory()->create(['fonds_initial' => 0]);
+    $carte = ModeDePaiement::factory()->horsTiroir()->create(['libelle' => 'Carte']);
+
+    // Le système n'a rien enregistré en carte ; le terminal affiche 5 000.
+    postJson("/api/sessions-caisse/{$session->id}/fermer", ['rapprochements' => [
+        ['mode_de_paiement_id' => $carte->id, 'montant_constate' => 5000],
+    ]])
+        ->assertOk()
+        ->assertJsonPath('data.rapprochements.0.montant_theorique', '0.00')
+        ->assertJsonPath('data.rapprochements.0.ecart', '5000.00')
+        ->assertJsonPath('data.rapprochements.0.ecart_sens', 'excedent');
+});
+
+it('ouvre une ligne pour chaque mode actif, même sans mouvement', function () {
+    // Sans ligne, une carte encaissée hors système n'aurait nulle part où
+    // apparaître : c'est précisément l'erreur qu'on cherche.
+    actingAsSessionUser(['session_caisse.update']);
+    $session = SessionCaisse::factory()->create(['fonds_initial' => 0]);
+    ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
+    ModeDePaiement::factory()->horsTiroir()->create(['libelle' => 'Carte']);
+    ModeDePaiement::factory()->inactif()->create(['libelle' => 'Retiré']);
+
+    postJson("/api/sessions-caisse/{$session->id}/fermer", [])
+        ->assertOk()
+        ->assertJsonCount(2, 'data.rapprochements');
+});
+
+it('laisse « non rapproché » un contenant que personne n\'a déclaré', function () {
+    actingAsSessionUser(['session_caisse.update']);
+    $session = SessionCaisse::factory()->create(['fonds_initial' => 0]);
+    $especes = ModeDePaiement::factory()->create(['libelle' => 'Espèces', 'ordre' => 1]);
+    ModeDePaiement::factory()->horsTiroir()->create(['libelle' => 'Virement', 'ordre' => 2]);
+
+    postJson("/api/sessions-caisse/{$session->id}/fermer", ['rapprochements' => [
+        ['mode_de_paiement_id' => $especes->id, 'montant_constate' => 0],
+    ]])
+        ->assertOk()
+        ->assertJsonPath('data.rapprochements.1.montant_constate', null)
+        ->assertJsonPath('data.rapprochements.1.ecart', null)
+        ->assertJsonPath('data.rapprochements.1.ecart_sens', 'non_rapproche');
+});
+
+/**
+ * La tolérance existe parce qu'avec de la petite monnaie on ne tombe jamais
+ * pile. Un terminal, lui, tombe toujours pile : un écart y est une transaction
+ * manquante, pas du bruit.
+ */
+it('ne tolère un écart que dans le tiroir', function () {
+    actingAsSessionUser(['session_caisse.update']);
+    $session = SessionCaisse::factory()->create(['fonds_initial' => 1000]);
+    ParametreEtablissement::factory()->create([
+        'site_id' => $session->caisse->pointDeVente->site_id,
+        'tolerance_ecart_caisse' => 500,
+    ]);
+    $especes = ModeDePaiement::factory()->create(['libelle' => 'Espèces', 'ordre' => 1]);
+    $carte = ModeDePaiement::factory()->horsTiroir()->create(['libelle' => 'Carte', 'ordre' => 2]);
+
+    // Même écart de 300 des deux côtés, deux verdicts différents.
+    postJson("/api/sessions-caisse/{$session->id}/fermer", ['rapprochements' => [
+        ['mode_de_paiement_id' => $especes->id, 'montant_constate' => 700],
+        ['mode_de_paiement_id' => $carte->id, 'montant_constate' => 300],
+    ]])
+        ->assertOk()
+        ->assertJsonPath('data.rapprochements.0.ecart_sens', 'tolere')
+        ->assertJsonPath('data.rapprochements.1.ecart_sens', 'excedent');
+});
+
+/**
+ * Le fonds initial est de l'argent liquide : il revient au premier mode en
+ * tiroir, sans quoi le caissier devrait le séparer des espèces qu'il compte.
+ */
+it('rattache le fonds initial au premier contenant en tiroir', function () {
+    actingAsSessionUser(['session_caisse.update']);
+    $session = SessionCaisse::factory()->create(['fonds_initial' => 10000]);
+    $especes = ModeDePaiement::factory()->create(['libelle' => 'Espèces', 'ordre' => 1]);
+    $carte = ModeDePaiement::factory()->horsTiroir()->create(['libelle' => 'Carte', 'ordre' => 2]);
+
+    postJson("/api/sessions-caisse/{$session->id}/fermer", ['rapprochements' => [
+        ['mode_de_paiement_id' => $especes->id, 'montant_constate' => 10000],
+        ['mode_de_paiement_id' => $carte->id, 'montant_constate' => 0],
+    ]])
+        ->assertOk()
+        ->assertJsonPath('data.rapprochements.0.montant_theorique', '10000.00')
+        ->assertJsonPath('data.rapprochements.0.ecart_sens', 'juste')
+        // Le terminal, lui, ne porte pas le fonds.
+        ->assertJsonPath('data.rapprochements.1.montant_theorique', '0.00');
 });
 
 // ───────────────────────── notes en suspens ─────────────────────────
@@ -233,7 +380,7 @@ it('refuse de fermer sur une note servie non réglée (409)', function () {
     $session = SessionCaisse::factory()->create(['fonds_initial' => 100]);
     CommandeClient::factory()->servie()->create(['session_caisse_id' => $session->id]);
 
-    postJson("/api/sessions-caisse/{$session->id}/fermer", ['montant_reel' => 100])
+    postJson("/api/sessions-caisse/{$session->id}/fermer", tiroirCompte(100))
         ->assertStatus(409)
         ->assertJsonPath('message', fn (string $m) => str_contains($m, 'non réglée'));
 
@@ -248,7 +395,7 @@ it('laisse fermer quand la note servie a été soldée', function () {
         'statut' => 'encaissee',
     ]);
 
-    postJson("/api/sessions-caisse/{$session->id}/fermer", ['montant_reel' => 100])
+    postJson("/api/sessions-caisse/{$session->id}/fermer", tiroirCompte(100))
         ->assertOk()
         ->assertJsonPath('data.statut', 'fermee');
 });
@@ -262,7 +409,7 @@ it('laisse fermer malgré une note encore en cuisine', function () {
     $session = SessionCaisse::factory()->create(['fonds_initial' => 100]);
     CommandeClient::factory()->envoyeeEnCuisine()->create(['session_caisse_id' => $session->id]);
 
-    postJson("/api/sessions-caisse/{$session->id}/fermer", ['montant_reel' => 100])
+    postJson("/api/sessions-caisse/{$session->id}/fermer", tiroirCompte(100))
         ->assertOk()
         ->assertJsonPath('data.statut', 'fermee');
 });
@@ -283,7 +430,7 @@ it('reporte sur la nouvelle session les notes laissées en cours de service', fu
         'statut' => 'encaissee',
     ]);
 
-    postJson("/api/sessions-caisse/{$ancienne->id}/fermer", ['montant_reel' => 0])->assertOk();
+    postJson("/api/sessions-caisse/{$ancienne->id}/fermer", tiroirCompte(0))->assertOk();
     $nouvelle = postJson('/api/sessions-caisse', ['caisse_id' => $caisse->id])->assertCreated();
 
     $nouvelleId = $nouvelle->json('data.id');
@@ -308,25 +455,35 @@ it('accepte un montant_reel = 0 (caisse vide)', function () {
     actingAsSessionUser(['session_caisse.update']);
     $session = SessionCaisse::factory()->create(['fonds_initial' => 0]);
 
-    postJson("/api/sessions-caisse/{$session->id}/fermer", ['montant_reel' => 0])
+    postJson("/api/sessions-caisse/{$session->id}/fermer", tiroirCompte(0))
         ->assertOk()
         ->assertJsonPath('data.statut', 'fermee');
 });
 
-it('refuse la fermeture sans montant_reel (422)', function () {
+/**
+ * Tous les contenants ne sont pas vérifiables le soir même : un virement arrive
+ * à la banque quand il arrive. Une fermeture sans rien constater est donc
+ * licite — mais elle ne prétend à aucun écart, sinon elle annoncerait un
+ * manquant égal à toute la recette du service.
+ */
+it('ferme sans rien constater, et n\'invente alors aucun écart', function () {
     actingAsSessionUser(['session_caisse.update']);
-    $session = SessionCaisse::factory()->create();
+    $session = SessionCaisse::factory()->create(['fonds_initial' => 100]);
 
     postJson("/api/sessions-caisse/{$session->id}/fermer", [])
-        ->assertUnprocessable()
-        ->assertJsonValidationErrors('montant_reel');
+        ->assertOk()
+        ->assertJsonPath('data.statut', 'fermee')
+        ->assertJsonPath('data.montant_theorique', '100.00')
+        ->assertJsonPath('data.montant_reel', null)
+        ->assertJsonPath('data.ecart', null)
+        ->assertJsonPath('data.ecart_sens', 'non_rapproche');
 });
 
 it('refuse la fermeture d\'une session déjà fermée (409)', function () {
     actingAsSessionUser(['session_caisse.update']);
     $session = SessionCaisse::factory()->fermee()->create();
 
-    postJson("/api/sessions-caisse/{$session->id}/fermer", ['montant_reel' => 10])
+    postJson("/api/sessions-caisse/{$session->id}/fermer", tiroirCompte(10))
         ->assertStatus(409);
 });
 
