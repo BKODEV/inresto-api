@@ -22,6 +22,10 @@ class CommandeClientResource extends JsonResource
             'table_numero' => $this->table_numero,
             'session_caisse_id' => $this->session_caisse_id,
             'user_id' => $this->user_id,
+            // Nom du serveur, pour le poste de caisse. Composé ici plutôt que
+            // d'exposer la fiche utilisateur : la caisse n'a besoin que de
+            // l'identifier, pas de ses coordonnées.
+            'serveur' => $this->whenLoaded('user', fn (): string => trim($this->user->prenom.' '.$this->user->nom)),
             'reservation_id' => $this->reservation_id,
             'appartement_id' => $this->appartement_id,
             'appartement_nom' => $this->appartement_nom,
@@ -36,6 +40,9 @@ class CommandeClientResource extends JsonResource
             'montant_du' => number_format($this->montantDu(), 2, '.', ''),
             'montant_paye' => number_format($this->montantPaye(), 2, '.', ''),
             'reste_a_payer' => number_format($this->resteAPayer(), 2, '.', ''),
+            // Vrai tant que rien n'a jamais garni la commande : le front propose
+            // alors « Libérer la table » plutôt que l'annulation motivée.
+            'peut_etre_liberee' => $this->peutEtreLiberee(),
             'notes' => $this->notes,
             'reference_facture_normalisee' => $this->reference_facture_normalisee,
             'table' => new TableSalleResource($this->whenLoaded('table')),

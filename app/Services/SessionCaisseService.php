@@ -13,10 +13,12 @@ use Illuminate\Support\Facades\DB;
  * Cycle de vie d'une session de caisse : ouverture (une seule ouverte par
  * caisse) et fermeture (rapprochement réel/théorique, calcul de l'écart).
  *
- * POINTS D'EXTENSION (TODO Lot C) :
- *  - `montant_theorique` agrège `fonds_initial + Σ paiements encaissés`. La table
- *    `paiements` n'existe pas encore : `SessionCaisse::montantPaye()` renvoie 0,
- *    donc montant_theorique = fonds_initial pour l'instant. À brancher au Lot C.
+ * `montant_theorique` agrège `fonds_initial + Σ paiements de la session`, via
+ * {@see SessionCaisse::montantPaye()}. Le rapprochement est donc réel : un
+ * paiement enregistré compte immédiatement comme de l'argent en tiroir, ce qui
+ * suppose que le caissier saisit au moment où l'argent lui est remis.
+ *
+ * POINT D'EXTENSION :
  *  - Le périmètre d'accès « utiliser une session » se remonte via
  *    caisse → point de vente → site, croisé avec le pivot `user_site` et la
  *    permission `session_caisse.utiliser`. Contrôle appliqué au Lot C (création
@@ -76,7 +78,6 @@ class SessionCaisseService
         }
 
         return DB::transaction(function () use ($session, $data): SessionCaisse {
-            // TODO Lot C : remplacer montantPaye() (=0) par la somme réelle des paiements.
             $montantTheorique = (float) $session->fonds_initial + $session->montantPaye();
             $montantReel = (float) $data['montant_reel'];
 

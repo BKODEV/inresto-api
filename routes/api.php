@@ -205,6 +205,8 @@ Route::middleware('auth:sanctum')->group(function () {
         ->parameters(['commandes-client' => 'commande']);
     Route::get('commandes-client/{commande}/pdf', [PdfController::class, 'factureClient'])
         ->name('commandes-client.pdf');
+    Route::get('commandes-client/{commande}/addition', [PdfController::class, 'additionClient'])
+        ->name('commandes-client.addition');
     Route::get('commandes-client/{commande}/recu', [PdfController::class, 'recuClient'])
         ->name('commandes-client.recu');
     Route::post('commandes-client/{commande}/lignes', [CommandeClientController::class, 'ajouterLigne'])
@@ -223,6 +225,10 @@ Route::middleware('auth:sanctum')->group(function () {
         ->name('commandes-client.paiements.store');
     Route::post('commandes-client/{commande}/remises', [RemiseController::class, 'store'])
         ->name('commandes-client.remises.store');
+    // Abandon d'une commande jamais garnie : suppression sèche, sans motif.
+    // L'annulation motivée reste la seule issue dès qu'elle a porté quelque chose.
+    Route::delete('commandes-client/{commande}', [CommandeClientController::class, 'destroy'])
+        ->name('commandes-client.destroy');
     Route::post('commandes-client/{commande}/annuler', [AnnulationController::class, 'annulerCommande'])
         ->name('commandes-client.annuler');
     Route::delete('commandes-client/{commande}/lignes/{ligne}', [AnnulationController::class, 'annulerLigne'])

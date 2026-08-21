@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\TypeImpression;
 use App\Models\CatalogueFournisseur;
 use App\Models\CommandeClient;
 use App\Models\CommandeFournisseur;
@@ -114,6 +115,79 @@ it('génère le reçu client en PDF', function () {
     getJson("/api/commandes-client/{$commande->id}/recu")
         ->assertOk()
         ->assertHeader('content-type', 'application/pdf');
+});
+
+it('génère l\'addition en PDF', function () {
+    actingWithPdfPerms(['commande_client.view']);
+    $commande = pdfCommandeClient();
+
+    getJson("/api/commandes-client/{$commande->id}/addition")
+        ->assertOk()
+        ->assertHeader('content-type', 'application/pdf');
+});
+
+/**
+ * Addition et reçu partagent un gabarit, ce qui rend facile de laisser fuiter
+ * l'un dans l'autre. Le ticket présenté AVANT le paiement ne doit rien affirmer
+ * sur l'argent : ni ligne de paiement, ni monnaie, ni remerciement pour une
+ * visite qui n'est pas réglée.
+ */
+it('n\'affiche aucun paiement ni remerciement sur l\'addition', function () {
+    $commande = pdfCommandeClient();
+
+    $html = app(PdfService::class)->htmlTicketClient($commande, TypeImpression::Addition);
+
+    expect($html)
+        ->toContain('ADDITION')
+        ->toContain('TOTAL À PAYER')
+        ->not->toContain('Merci de votre visite')
+        ->not->toContain('MONNAIE');
+});
+
+it('imprime le montant tendu et la monnaie sur le reçu', function () {
+    $commande = pdfCommandeClient();
+    // Le client pose 5 000 pour une note de 1 500 : 3 500 à lui rendre.
+    $commande->paiements()->update(['montant' => 1500, 'montant_recu' => 5000]);
+
+    $html = app(PdfService::class)->htmlTicketClient($commande->fresh('paiements'));
+
+    expect($html)
+        ->toContain('REÇU')
+        ->toContain('MONNAIE')
+        ->toContain('5 000 XOF')   // tendu
+        ->toContain('3 500 XOF')   // monnaie rendue
+        ->toContain('Merci de votre visite');
+});
+
+/**
+ * `montant` alimente `montant_theorique` de la session : y inscrire le billet
+ * tendu ferait apparaître un manquant chaque soir, égal à la monnaie rendue.
+ * Le reçu doit donc lire `montant_recu`, jamais gonfler `montant`.
+ */
+it('n\'annonce aucune monnaie quand le compte est juste', function () {
+    $commande = pdfCommandeClient();
+    $commande->paiements()->update(['montant' => 1500, 'montant_recu' => null]);
+
+    $html = app(PdfService::class)->htmlTicketClient($commande->fresh('paiements'));
+
+    expect($html)->not->toContain('MONNAIE');
+});
+
+/**
+ * Les paiements antérieurs à `montant_recu` portaient la monnaie dans un
+ * surpaiement. Le reçu réimprimé doit rester juste.
+ */
+it('lit la monnaie d\'un surpaiement enregistré avant montant_recu', function () {
+    $commande = pdfCommandeClient();
+    $commande->paiements()->update(['montant' => 2000, 'montant_recu' => null]);
+
+    $html = app(PdfService::class)->htmlTicketClient($commande->fresh('paiements'));
+
+    // Note de 1 500 payée 2 000 : 500 de monnaie, et aucun reste à réclamer.
+    expect($html)
+        ->toContain('MONNAIE')
+        ->toContain('500 XOF')
+        ->not->toContain('Reste');
 });
 
 it('génère la fiche technique en PDF', function () {

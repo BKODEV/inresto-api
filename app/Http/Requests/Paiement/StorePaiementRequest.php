@@ -29,6 +29,10 @@ class StorePaiementRequest extends FormRequest
                 Rule::exists('modes_de_paiement', 'id')->where('statut', Statut::Actif->value),
             ],
             'montant' => ['required', 'numeric', 'gt:0'],
+            // Espèces tendues. `gte:montant` : on ne rend pas plus que ce qu'on
+            // a reçu, et une saisie inférieure au montant encaissé trahit une
+            // inversion des deux champs.
+            'montant_recu' => ['nullable', 'numeric', 'gte:montant'],
             'reference_externe' => ['nullable', 'string', 'max:255'],
         ];
     }

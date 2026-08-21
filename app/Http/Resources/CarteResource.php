@@ -15,13 +15,17 @@ class CarteResource extends JsonResource
     public function toArray(Request $request): array
     {
         return [
-            'id'             => $this->id,
-            'libelle'        => $this->libelle,
-            'statut'         => $this->statut->value,
+            'id' => $this->id,
+            'libelle' => $this->libelle,
+            // Exposé à plat en plus de l'objet imbriqué : les écrans qui
+            // rattachent une carte à son point de vente n'ont pas toujours la
+            // relation chargée, et `whenLoaded` la ferait disparaître.
+            'point_de_vente_id' => $this->point_de_vente_id,
+            'statut' => $this->statut->value,
             'point_de_vente' => new PointDeVenteResource($this->whenLoaded('pointDeVente')),
-            'created_at'     => $this->created_at?->toIso8601String(),
-            'updated_at'     => $this->updated_at?->toIso8601String(),
-            'deleted_at'     => $this->deleted_at?->toIso8601String(),
+            'created_at' => $this->created_at?->toIso8601String(),
+            'updated_at' => $this->updated_at?->toIso8601String(),
+            'deleted_at' => $this->deleted_at?->toIso8601String(),
         ];
     }
 }

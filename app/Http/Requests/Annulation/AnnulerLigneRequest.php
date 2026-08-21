@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Requests\Annulation;
 
 use App\Models\Annulation;
-use App\Models\CommandeClient;
+use App\Models\LigneCommandeClient;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -22,15 +22,19 @@ class AnnulerLigneRequest extends FormRequest
      */
     public function rules(): array
     {
-        /** @var CommandeClient $commande */
-        $commande = $this->route('commande');
+        /** @var LigneCommandeClient $ligne */
+        $ligne = $this->route('ligne');
 
         return [
-            'motif' => ['required', 'string'],
-            // `sort` n'est obligatoire que si la ligne a déjà été déstockée
-            // (commande servie au moment de l'annulation).
+            // Motif exigé seulement si la ligne est partie en cuisine : elle a
+            // alors une conséquence — production lancée, éventuellement stock
+            // déchargé. Une ligne encore au brouillon se retire sans rien
+            // justifier, sinon la table `annulations` — celle qui sert à
+            // repérer les fraudes — se remplirait de « erreur de saisie ».
+            'motif' => [$ligne->estEnvoyee() ? 'required' : 'nullable', 'string'],
+            // `sort` n'est obligatoire que si la LIGNE a déjà été déstockée.
             'sort' => [
-                $commande->estServie() ? 'required' : 'nullable',
+                $ligne->estServie() ? 'required' : 'nullable',
                 Rule::in(['remise_en_stock', 'perte']),
             ],
         ];

@@ -12,6 +12,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 /**
  * Paiement encaissé sur une commande client. Le total payé d'une session de
  * caisse en découle (SessionCaisse::montantPaye).
+ *
+ * `montant` est ce qui reste en tiroir ; `montant_recu` les espèces tendues,
+ * quand il y a eu de la monnaie à rendre. La différence des deux ne s'invente
+ * pas au moment d'imprimer le reçu : elle se saisit au comptoir.
  */
 class Paiement extends Model
 {
@@ -25,11 +29,13 @@ class Paiement extends Model
         'mode_de_paiement_id',
         'user_id',
         'montant',
+        'montant_recu',
         'reference_externe',
     ];
 
     protected $casts = [
         'montant' => 'decimal:2',
+        'montant_recu' => 'decimal:2',
         'date_heure' => 'datetime',
     ];
 

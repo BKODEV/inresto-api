@@ -22,7 +22,9 @@ function commandeServieAvecLigne(object $ctx, $user, float $prix, int $quantite)
 {
     $produit = produitSurCarte($ctx, $prix);
     $commande = commandeSur($ctx, $user, 'servie');
-    LigneCommandeClient::factory()->create([
+    // Le cycle de vie vit sur la ligne : une note « servie » dont les lignes ne
+    // le sont pas serait incohérente.
+    LigneCommandeClient::factory()->servie()->create([
         'commande_client_id' => $commande->id,
         'produit_id' => $produit->id,
         'quantite' => $quantite,
@@ -48,12 +50,62 @@ it('enregistre un paiement sur une commande servie', function () {
     expect($commande->montantPaye())->toBe(50.0);
 });
 
+/**
+ * Le billet tendu et l'argent qui reste en tiroir sont deux montants distincts.
+ * `montant` alimente `montant_theorique` de la session : y inscrire le billet
+ * ferait compter comme en caisse la monnaie déjà rendue, et sortirait un
+ * manquant à chaque fermeture.
+ */
+it('mémorise les espèces tendues sans les compter comme encaissées', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['paiement.create', 'session_caisse.utiliser']);
+    $commande = commandeServieAvecLigne($ctx, $user, 7500, 1);
+    $mode = ModeDePaiement::factory()->create();
+
+    postJson("/api/commandes-client/{$commande->id}/paiements", [
+        'mode_de_paiement_id' => $mode->id,
+        'montant' => 7500,
+        'montant_recu' => 10000,
+    ])->assertCreated()
+        ->assertJsonPath('data.montant_recu', '10000.00');
+
+    // 2 500 rendus au client : ils ne sont jamais entrés en caisse.
+    expect($commande->montantPaye())->toBe(7500.0)
+        ->and($commande->resteAPayer())->toBe(0.0);
+});
+
+it('refuse un montant reçu inférieur au montant encaissé (422)', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['paiement.create', 'session_caisse.utiliser']);
+    $commande = commandeServieAvecLigne($ctx, $user, 7500, 1);
+    $mode = ModeDePaiement::factory()->create();
+
+    // Les deux champs inversés : on ne rend pas plus que ce qu'on a reçu.
+    postJson("/api/commandes-client/{$commande->id}/paiements", [
+        'mode_de_paiement_id' => $mode->id,
+        'montant' => 7500,
+        'montant_recu' => 5000,
+    ])->assertStatus(422)->assertJsonValidationErrors('montant_recu');
+});
+
+it('accepte un paiement sans espèces tendues (carte, appoint juste)', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['paiement.create', 'session_caisse.utiliser']);
+    $commande = commandeServieAvecLigne($ctx, $user, 50, 1);
+    $mode = ModeDePaiement::factory()->create();
+
+    postJson("/api/commandes-client/{$commande->id}/paiements", [
+        'mode_de_paiement_id' => $mode->id,
+        'montant' => 50,
+    ])->assertCreated()->assertJsonPath('data.montant_recu', null);
+});
+
 it('refuse un paiement sur une commande ouverte (422)', function () {
     $ctx = salleContext();
     $user = actingAsServeur($ctx->site, ['paiement.create', 'session_caisse.utiliser']);
     $produit = produitSurCarte($ctx, 10);
     $commande = commandeSur($ctx, $user, 'ouverte');
-    LigneCommandeClient::factory()->create(['commande_client_id' => $commande->id, 'produit_id' => $produit->id, 'quantite' => 1, 'prix_unitaire' => 10]);
+    LigneCommandeClient::factory()->servie()->create(['commande_client_id' => $commande->id, 'produit_id' => $produit->id, 'quantite' => 1, 'prix_unitaire' => 10]);
     $mode = ModeDePaiement::factory()->create();
 
     postJson("/api/commandes-client/{$commande->id}/paiements", [

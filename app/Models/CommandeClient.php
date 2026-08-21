@@ -90,6 +90,35 @@ class CommandeClient extends Model
         return $this->hasMany(Remise::class);
     }
 
+    /**
+     * Commande abandonnable : ouverte et n'ayant JAMAIS rien porté.
+     *
+     * Taper une table crée aussitôt sa commande — c'est ce qui réserve la table
+     * et empêche deux serveurs de l'ouvrir en même temps. Défaire ce geste ne
+     * doit rien coûter : rien n'a été commandé, rien n'est parti en cuisine,
+     * rien n'a bougé en stock. Exiger un motif d'annulation reviendrait à noyer
+     * la table `annulations` — la trace qui sert à détecter les fraudes — sous
+     * des « erreur de saisie ».
+     *
+     * Le test porte sur l'existence des lignes, pas sur les lignes ACTIVES :
+     * une commande dont tout a été annulé porte déjà des `annulations`, elle a
+     * donc une histoire et doit passer par l'annulation motivée.
+     */
+    public function peutEtreLiberee(): bool
+    {
+        if (! $this->estOuverte()) {
+            return false;
+        }
+
+        $lignes = $this->relationLoaded('lignes')
+            ? $this->lignes->count()
+            : ($this->lignes_count ?? $this->lignes()->count());
+
+        $paiements = $this->paiements_count ?? $this->paiements()->count();
+
+        return $lignes === 0 && $paiements === 0;
+    }
+
     public function estOuverte(): bool
     {
         return $this->statut === StatutCommandeClient::Ouverte;

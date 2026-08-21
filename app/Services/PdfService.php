@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Enums\TypeImpression;
 use App\Models\CatalogueFournisseur;
 use App\Models\CommandeClient;
 use App\Models\CommandeFournisseur;
@@ -92,10 +93,17 @@ class PdfService
     }
 
     /**
-     * Reçu de paiement (ticket 80mm).
+     * Ticket client 80mm, dans l'un de ses deux états.
+     *
+     * Addition et reçu partagent le gabarit parce qu'ils partagent le contenu :
+     * ce qui les sépare est ce qu'ils affirment. L'addition demande le paiement
+     * et n'affiche donc aucune ligne de paiement ; le reçu le prouve, et lui
+     * seul porte la monnaie rendue.
      */
-    public function htmlRecuClient(CommandeClient $commande): string
-    {
+    public function htmlTicketClient(
+        CommandeClient $commande,
+        TypeImpression $type = TypeImpression::Recu,
+    ): string {
         $commande->loadMissing([
             'table.pointDeVente.site',
             'user',
@@ -109,16 +117,19 @@ class PdfService
         return View::make('pdf.recu-client', [
             'commande' => $commande,
             'parametre' => $parametre,
+            'type' => $type,
         ])->render();
     }
 
-    public function recuClient(CommandeClient $commande): Response
-    {
+    public function ticketClient(
+        CommandeClient $commande,
+        TypeImpression $type = TypeImpression::Recu,
+    ): Response {
         // Largeur ticket 80mm = 226.77pt ; hauteur volontairement large, dompdf
         // tronque au contenu. La taille est aussi déclarée en CSS (@page).
-        return Pdf::loadHTML($this->htmlRecuClient($commande))
+        return Pdf::loadHTML($this->htmlTicketClient($commande, $type))
             ->setPaper([0, 0, 226.77, 800])
-            ->stream("recu-{$commande->id}.pdf");
+            ->stream("{$type->value}-{$commande->id}.pdf");
     }
 
     /**

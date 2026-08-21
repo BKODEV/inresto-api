@@ -39,6 +39,8 @@ class LigneCommandeClient extends Model
         'quantite' => 'integer',
         'prix_unitaire' => 'decimal:2',
         'statut' => Statut::class,
+        'envoyee_le' => 'datetime',
+        'servie_le' => 'datetime',
     ];
 
     public function commande(): BelongsTo
@@ -59,5 +61,29 @@ class LigneCommandeClient extends Model
     public function estActive(): bool
     {
         return $this->statut === Statut::Actif;
+    }
+
+    /**
+     * Partie en cuisine. `envoyee_le` sert aussi d'identifiant de tour : les
+     * lignes d'un même envoi partagent son horodatage.
+     */
+    public function estEnvoyee(): bool
+    {
+        return $this->envoyee_le !== null;
+    }
+
+    /** Servie et déstockée. Empêche un second service de redéstocker. */
+    public function estServie(): bool
+    {
+        return $this->servie_le !== null;
+    }
+
+    /**
+     * Ligne encore au brouillon : jamais partie en cuisine, donc sans
+     * conséquence — elle se retire sans motif d'annulation.
+     */
+    public function estRetirableSansMotif(): bool
+    {
+        return $this->envoyee_le === null;
     }
 }

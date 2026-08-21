@@ -378,3 +378,32 @@ it('refuse l\'ajout sans la permission', function () {
         'prix_vente' => 9,
     ])->assertForbidden();
 });
+
+// ───────────────────────── contrat de la ressource carte ─────────────────────────
+
+/**
+ * La prise de commande retrouve la carte active de son point de vente en
+ * comparant `point_de_vente_id`. Sans ce champ à plat, aucune carte ne
+ * correspondait jamais et l'écran affichait « Aucune carte active pour ce
+ * point de vente » alors qu'elle existait — et modifier une carte
+ * pré-remplissait son point de vente avec une valeur vide.
+ */
+it('expose le point de vente d\'une carte à plat et non seulement imbriqué', function () {
+    actingAsCarteUser(['carte.view']);
+    $carte = Carte::factory()->active()->create();
+
+    getJson('/api/parametres/cartes')
+        ->assertOk()
+        ->assertJsonPath('data.0.point_de_vente_id', $carte->point_de_vente_id)
+        ->assertJsonPath('data.0.statut', 'active')
+        ->assertJsonPath('data.0.point_de_vente.id', $carte->point_de_vente_id);
+});
+
+it('expose aussi le point de vente à plat sur la fiche d\'une carte', function () {
+    actingAsCarteUser(['carte.view']);
+    $carte = Carte::factory()->create();
+
+    getJson("/api/parametres/cartes/{$carte->id}")
+        ->assertOk()
+        ->assertJsonPath('data.point_de_vente_id', $carte->point_de_vente_id);
+});

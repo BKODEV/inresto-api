@@ -48,13 +48,29 @@ class PdfController extends Controller
         return $this->service->factureClient($commande);
     }
 
+    /**
+     * Addition : le détail et le TOTAL À PAYER, présentés avant l'argent.
+     * Journalisée à part du reçu — la réimprimer n'a pas le même poids.
+     */
+    public function additionClient(CommandeClient $commande): Response
+    {
+        $this->authorize('view', $commande);
+
+        $this->journaliser($commande, TypeImpression::Addition);
+
+        return $this->service->ticketClient($commande, TypeImpression::Addition);
+    }
+
+    /**
+     * Reçu : la preuve du paiement, monnaie rendue comprise.
+     */
     public function recuClient(CommandeClient $commande): Response
     {
         $this->authorize('view', $commande);
 
         $this->journaliser($commande, TypeImpression::Recu);
 
-        return $this->service->recuClient($commande);
+        return $this->service->ticketClient($commande, TypeImpression::Recu);
     }
 
     /**

@@ -6,6 +6,7 @@ namespace App\Http\Requests\CommandeClient;
 
 use App\Enums\StatutCommandeClient;
 use App\Models\CommandeClient;
+use App\Models\Paiement;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -42,6 +43,17 @@ class IndexCommandeClientRequest extends FormRequest
             // tout ce qui suit minuit du dernier jour.
             'date_debut' => ['sometimes', 'date'],
             'date_fin' => ['sometimes', 'date', 'after_or_equal:date_debut'],
+            // Charge les paiements et leur mode. Hors de la liste par défaut :
+            // l'écran de prise de commande se rafraîchit toutes les vingt
+            // secondes et n'a que faire de l'argent. Seule la liste des ventes
+            // le demande — et seulement pour qui a le droit de voir l'argent,
+            // sinon un serveur lirait le détail du tiroir en ajoutant un
+            // paramètre à l'URL.
+            'avec_paiements' => [
+                'sometimes',
+                'boolean',
+                Rule::prohibitedIf(fn (): bool => $this->user()->cannot('viewAny', Paiement::class)),
+            ],
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:200'],
             'page' => ['sometimes', 'integer', 'min:1'],
         ];

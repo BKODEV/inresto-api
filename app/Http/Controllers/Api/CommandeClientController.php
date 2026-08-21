@@ -5,15 +5,18 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Enums\Statut;
-use App\Enums\StatutCommandeClient;
 use App\Helpers\ApiResponse;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\CommandeClient\EnvoyerEnCuisineRequest;
 use App\Http\Requests\CommandeClient\IndexCommandeClientRequest;
+use App\Http\Requests\CommandeClient\ServirRequest;
 use App\Http\Requests\CommandeClient\StoreCommandeClientLigneRequest;
 use App\Http\Requests\CommandeClient\StoreCommandeClientRequest;
 use App\Http\Resources\CommandeClientResource;
 use App\Http\Resources\LigneCommandeClientResource;
+use App\Http\Resources\TableSalleResource;
 use App\Models\CommandeClient;
+use App\Models\LigneCommandeClient;
 use App\Models\PointDeVente;
 use App\Services\CommandeClientService;
 use App\Support\SitePerimetre;
@@ -24,7 +27,12 @@ use Illuminate\Support\Carbon;
 class CommandeClientController extends Controller
 {
     /** Relations chargées pour une commande complète. */
-    private const RELATIONS = ['table', 'sessionCaisse', 'lignes.produit'];
+    /**
+     * `user` = le serveur qui a ouvert la note. Chargé pour le poste de caisse :
+     * quand un serveur vient verser, le caissier filtre sur lui pour solder ses
+     * tables.
+     */
+    private const RELATIONS = ['table', 'sessionCaisse', 'lignes.produit', 'user'];
 
     public function __construct(private readonly CommandeClientService $service) {}
 
@@ -49,6 +57,12 @@ class CommandeClientController extends Controller
 
         $commandes = CommandeClient::query()
             ->with(self::RELATIONS)
+            // Alimente `peut_etre_liberee` sans requête par ligne.
+            ->withCount(['lignes', 'paiements'])
+            ->when(
+                $filtres['avec_paiements'] ?? false,
+                fn (Builder $query) => $query->with('paiements.modePaiement')
+            )
             ->when(
                 $sites !== null,
                 fn (Builder $query) => $query->whereHas(
@@ -112,9 +126,29 @@ class CommandeClientController extends Controller
         $this->authorize('view', $commande);
 
         return ApiResponse::success(
-            new CommandeClientResource($commande->load(self::RELATIONS)),
+            new CommandeClientResource(
+                $commande->load(self::RELATIONS)->loadCount(['lignes', 'paiements'])
+            ),
             'Commande client récupérée.'
         );
+    }
+
+    /**
+     * Abandonne une commande ouverte que rien n'a jamais garnie.
+     *
+     * Gouverné par `commande_client.update` et non `.delete` : c'est le serveur
+     * qui vient de taper la mauvaise table qui doit pouvoir défaire son geste,
+     * or son rôle porte `update` (celle qui l'autorise déjà à ajouter et
+     * retirer des lignes) et pas `delete`. Le garde-fou réel est dans le
+     * service : une commande ayant porté quoi que ce soit est refusée en 409.
+     */
+    public function destroy(CommandeClient $commande): JsonResponse
+    {
+        $this->authorize('update', $commande);
+
+        $this->service->liberer($commande);
+
+        return ApiResponse::deleted('Table libérée.');
     }
 
     /**
@@ -131,28 +165,36 @@ class CommandeClientController extends Controller
     }
 
     /**
-     * Transition ouverte → envoyee_en_cuisine.
+     * Envoie un tour en cuisine, panier compris.
+     *
+     * Geste unique de la prise de commande : les lignes du panier local partent
+     * et sont expédiées en un seul appel, au lieu d'un aller-retour par plat.
+     * Répétable — un repas se commande en plusieurs services.
      */
-    public function envoyerEnCuisine(CommandeClient $commande): JsonResponse
+    public function envoyerEnCuisine(EnvoyerEnCuisineRequest $request, CommandeClient $commande): JsonResponse
     {
-        $this->authorize('update', $commande);
-
-        $commande = $this->service->envoyerEnCuisine($commande, request()->user()->id);
+        $commande = $this->service->envoyerEnCuisine(
+            $commande,
+            $request->validated()['lignes'] ?? [],
+            $request->user()->id,
+        );
 
         return ApiResponse::updated(
             new CommandeClientResource($commande),
-            'Commande envoyée en cuisine.'
+            'Tour envoyé en cuisine.'
         );
     }
 
     /**
      * Transition envoyee_en_cuisine → servie (avec déstockage).
      */
-    public function servir(CommandeClient $commande): JsonResponse
+    public function servir(ServirRequest $request, CommandeClient $commande): JsonResponse
     {
-        $this->authorize('update', $commande);
-
-        $commande = $this->service->servir($commande, request()->user()->id);
+        $commande = $this->service->servir(
+            $commande,
+            $request->user()->id,
+            $request->validated()['lignes'] ?? [],
+        );
 
         return ApiResponse::updated(
             new CommandeClientResource($commande),
@@ -176,12 +218,16 @@ class CommandeClientController extends Controller
     }
 
     /**
-     * KDS : commandes envoyée_en_cuisine d'un PDV, avec leurs lignes actives.
+     * KDS : file de production d'un point de vente, par tours.
      *
-     * Gardé comme toute lecture de commandes, et borné au périmètre de site :
-     * l'écran est monté au mur d'une cuisine, il n'a aucune raison d'exposer
-     * la file d'un autre établissement. Le masquage côté front est un confort
-     * d'affichage, pas une protection — la route reste appelable directement.
+     * Interroge les LIGNES et non les commandes : une note vit plusieurs
+     * services, et son statut ne dit pas ce qui reste à produire. Une ligne est
+     * en production dès qu'elle est partie (`envoyee_le`) et tant qu'elle n'est
+     * pas servie — les tours suivants d'une note déjà servie apparaissent donc
+     * bien, ce que le filtre par statut de commande rendait impossible.
+     *
+     * Les lignes sont groupées par note puis par tour, du plus ancien au plus
+     * récent : la cuisine produit dans l'ordre d'arrivée.
      */
     public function kds(PointDeVente $point_de_vente): JsonResponse
     {
@@ -190,19 +236,32 @@ class CommandeClientController extends Controller
         $point_de_vente->loadMissing('site');
         SitePerimetre::resoudre(request()->user(), (int) $point_de_vente->site_id);
 
-        $commandes = CommandeClient::query()
-            ->where('statut', StatutCommandeClient::EnvoyeeEnCuisine->value)
-            ->whereHas('table', fn (Builder $query) => $query->where('point_de_vente_id', $point_de_vente->id))
-            ->with([
-                'table',
-                'lignes' => fn ($query) => $query->where('statut', Statut::Actif->value),
-                'lignes.produit',
-            ])
-            ->orderBy('date_heure')
+        $lignes = LigneCommandeClient::query()
+            ->where('statut', Statut::Actif->value)
+            ->whereNotNull('envoyee_le')
+            ->whereNull('servie_le')
+            ->whereHas(
+                'commande.table',
+                fn (Builder $query) => $query->where('point_de_vente_id', $point_de_vente->id)
+            )
+            ->with(['produit', 'commande.table'])
+            ->orderBy('envoyee_le')
+            ->orderBy('id')
             ->get();
 
+        $tours = $lignes
+            ->groupBy(fn (LigneCommandeClient $ligne): string => $ligne->commande_client_id.'|'.$ligne->envoyee_le?->toIso8601String())
+            ->map(fn ($lignesDuTour): array => [
+                'commande_id' => $lignesDuTour->first()->commande_client_id,
+                'table' => new TableSalleResource($lignesDuTour->first()->commande->table),
+                'envoyee_le' => $lignesDuTour->first()->envoyee_le?->toIso8601String(),
+                'lignes' => LigneCommandeClientResource::collection($lignesDuTour->values()),
+            ])
+            ->values()
+            ->all();
+
         return ApiResponse::success(
-            ['commandes' => CommandeClientResource::collection($commandes)],
+            ['tours' => $tours],
             'File KDS récupérée.'
         );
     }

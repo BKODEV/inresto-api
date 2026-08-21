@@ -16,7 +16,7 @@ use App\Models\Paiement;
 class PaiementService
 {
     /**
-     * @param  array{mode_de_paiement_id: int, montant: float|string, reference_externe?: string|null}  $data
+     * @param  array{mode_de_paiement_id: int, montant: float|string, montant_recu?: float|string|null, reference_externe?: string|null}  $data
      *
      * @throws PaiementException
      */
@@ -33,6 +33,7 @@ class PaiementService
         $paiement = $commande->paiements()->make([
             'mode_de_paiement_id' => $data['mode_de_paiement_id'],
             'montant' => $data['montant'],
+            'montant_recu' => $data['montant_recu'] ?? null,
             'reference_externe' => $data['reference_externe'] ?? null,
         ]);
         $paiement->user_id = $userId;

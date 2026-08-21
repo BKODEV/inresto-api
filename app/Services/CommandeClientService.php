@@ -20,6 +20,7 @@ use App\Models\LigneCommandeClient;
 use App\Models\SessionCaisse;
 use App\Models\TableSalle;
 use App\Models\User;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -107,8 +108,14 @@ class CommandeClientService
     }
 
     /**
-     * Ajoute une ligne à une commande ouverte. Le prix est figé au prix de la
-     * ligne carte_produit ACTIVE du produit sur la carte ACTIVE du PDV.
+     * Ajoute une ligne au brouillon de la note.
+     *
+     * La ligne naît NON envoyée : la cuisine ne la voit pas, rien n'est
+     * déstocké, et elle se retire sans motif. Elle ne part qu'à
+     * {@see envoyerEnCuisine()}.
+     *
+     * Autorisé tant que la note n'est ni encaissée ni annulée — un repas se
+     * commande en plusieurs fois, le dessert arrive après les plats.
      *
      * @param  array{produit_id: int, quantite: int, commentaire?: string|null}  $data
      *
@@ -116,82 +123,114 @@ class CommandeClientService
      */
     public function ajouterLigne(CommandeClient $commande, array $data, string $_userId): LigneCommandeClient
     {
-        if (! $commande->estOuverte()) {
-            throw CommandeClientException::ajoutLigneStatutInvalide($commande->id);
-        }
+        $this->assertNoteModifiable($commande);
 
-        $commande->loadMissing('table');
-        $prixUnitaire = $this->prixSurCarteActive((int) $commande->table->point_de_vente_id, (int) $data['produit_id']);
-
-        if ($prixUnitaire === null) {
-            throw CommandeClientException::produitHorsCarte((int) $data['produit_id']);
-        }
-
-        return DB::transaction(function () use ($commande, $data, $prixUnitaire): LigneCommandeClient {
-            $ligne = $commande->lignes()->create([
-                'produit_id' => $data['produit_id'],
-                'quantite' => $data['quantite'],
-                'prix_unitaire' => $prixUnitaire,
-                'commentaire' => $data['commentaire'] ?? null,
-                'statut' => Statut::Actif->value,
-            ]);
+        return DB::transaction(function () use ($commande, $data): LigneCommandeClient {
+            $ligne = $this->creerLigne($commande, $data, null);
 
             $this->recalculerMontantTotal($commande);
+            $this->rafraichirStatut($commande);
 
             return $ligne->load('produit');
         });
     }
 
     /**
-     * Transition ouverte → envoyee_en_cuisine. Refuse si aucune ligne active.
+     * Envoie un tour en cuisine.
+     *
+     * Geste unique de la prise de commande : les lignes du panier sont créées
+     * ET expédiées en un seul appel. Une ligne enregistrée que la cuisine ne
+     * verrait pas ne servirait personne — le serveur croirait avoir commandé
+     * sans que rien ne cuise.
+     *
+     * Toutes les lignes du tour reçoivent le MÊME horodatage : c'est lui qui
+     * identifie le tour et permet à la cuisine de distinguer un nouveau ticket
+     * de ce qui est déjà en production. Répétable autant de fois que le repas
+     * compte de services.
+     *
+     * @param  array<int, array{produit_id: int, quantite: int, commentaire?: string|null}>  $lignes  Panier à créer avant l'envoi.
      *
      * @throws CommandeClientException
      */
-    public function envoyerEnCuisine(CommandeClient $commande, string $_userId): CommandeClient
+    public function envoyerEnCuisine(CommandeClient $commande, array $lignes, string $_userId): CommandeClient
     {
-        if (! $commande->estOuverte()) {
-            throw CommandeClientException::transitionInvalide($commande->statut, StatutCommandeClient::EnvoyeeEnCuisine);
-        }
+        $this->assertNoteModifiable($commande);
 
-        $aDesLignes = $commande->lignes()->where('statut', Statut::Actif->value)->exists();
+        return DB::transaction(function () use ($commande, $lignes): CommandeClient {
+            foreach ($lignes as $data) {
+                $this->creerLigne($commande, $data, null);
+            }
 
-        if (! $aDesLignes) {
-            throw CommandeClientException::envoiSansLigne($commande->id);
-        }
+            $enAttente = $commande->lignes()
+                ->where('statut', Statut::Actif->value)
+                ->whereNull('envoyee_le')
+                ->get();
 
-        $commande->statut = StatutCommandeClient::EnvoyeeEnCuisine;
-        $commande->save();
+            if ($enAttente->isEmpty()) {
+                throw CommandeClientException::envoiSansLigne($commande->id);
+            }
 
-        return $commande->load(['table', 'sessionCaisse', 'lignes.produit']);
+            $tour = now();
+            foreach ($enAttente as $ligne) {
+                $ligne->envoyee_le = $tour;
+                $ligne->save();
+            }
+
+            $this->recalculerMontantTotal($commande);
+            $this->rafraichirStatut($commande);
+
+            return $commande->load(['table', 'sessionCaisse', 'lignes.produit']);
+        });
     }
 
     /**
-     * Transition envoyee_en_cuisine → servie, AVEC déstockage atomique. Pour
-     * chaque ligne active : récupère la fiche active du produit (sinon log +
+     * Marque servies les lignes parties en cuisine et pas encore servies, AVEC
+     * déstockage atomique.
+     *
+     * `$ligneIds` restreint le service à un tour précis ; vide, toute la
+     * production en attente de la note est servie.
+     *
+     * Le filtre sur `servie_le` est ce qui rend le multi-tour sûr : servir le
+     * dessert ne doit pas redéstocker les plats du premier tour. Sans lui, la
+     * dérive de stock n'apparaîtrait qu'à l'inventaire.
+     *
+     * Pour chaque ligne : récupère la fiche active du produit (sinon log +
      * skip), fige `fiche_technique_id`, puis décharge le stock du site
      * (matières directes + matières des sous-recettes explosées au prorata).
      * Une vente n'est jamais bloquée par un stock insuffisant.
      *
      * @throws CommandeClientException
      */
-    public function servir(CommandeClient $commande, string $userId): CommandeClient
+    public function servir(CommandeClient $commande, string $userId, array $ligneIds = []): CommandeClient
     {
-        if (! $commande->estEnvoyeeEnCuisine()) {
-            throw CommandeClientException::transitionInvalide($commande->statut, StatutCommandeClient::Servie);
-        }
+        $this->assertNoteModifiable($commande);
 
         $commande->loadMissing('table.pointDeVente');
         $siteId = (int) $commande->table->pointDeVente->site_id;
 
-        return DB::transaction(function () use ($commande, $siteId, $userId): CommandeClient {
-            $lignes = $commande->lignes()->where('statut', Statut::Actif->value)->get();
+        return DB::transaction(function () use ($commande, $siteId, $userId, $ligneIds): CommandeClient {
+            $lignes = $commande->lignes()
+                ->where('statut', Statut::Actif->value)
+                ->whereNotNull('envoyee_le')
+                ->whereNull('servie_le')
+                // Restreint à un tour précis : la cuisine valide un ticket, pas
+                // la note. Une note peut porter deux tours en production, et
+                // servir le premier ne doit pas emporter le second.
+                ->when($ligneIds !== [], fn ($query) => $query->whereIn('id', $ligneIds))
+                ->get();
 
-            foreach ($lignes as $ligne) {
-                $this->destockerLigne($ligne, $commande->id, $siteId, $userId);
+            if ($lignes->isEmpty()) {
+                throw CommandeClientException::serviceSansLigne($commande->id);
             }
 
-            $commande->statut = StatutCommandeClient::Servie;
-            $commande->save();
+            $servieLe = now();
+            foreach ($lignes as $ligne) {
+                $this->destockerLigne($ligne, $commande->id, $siteId, $userId);
+                $ligne->servie_le = $servieLe;
+                $ligne->save();
+            }
+
+            $this->rafraichirStatut($commande);
 
             return $commande->load(['table', 'sessionCaisse', 'lignes.produit']);
         });
@@ -228,6 +267,37 @@ class CommandeClientService
             $this->tables->changerStatut($commande->table, StatutTable::ADebarrasser);
 
             return $commande->load(['table', 'sessionCaisse', 'lignes.produit', 'paiements.modePaiement', 'remises']);
+        });
+    }
+
+    /**
+     * Abandonne une commande ouverte que rien n'a jamais garnie, et rend sa
+     * table au service.
+     *
+     * Suppression sèche, sans motif et sans trace d'annulation : il ne s'est
+     * rien passé. Voir {@see CommandeClient::peutEtreLiberee()} pour la règle
+     * et sa justification.
+     *
+     * @throws CommandeClientException
+     */
+    public function liberer(CommandeClient $commande): void
+    {
+        if (! $commande->peutEtreLiberee()) {
+            throw CommandeClientException::liberationImpossible($commande->id);
+        }
+
+        DB::transaction(function () use ($commande): void {
+            $commande->loadMissing('table');
+            $table = $commande->table;
+
+            $commande->delete();
+
+            // La table n'est rendue que si elle était occupée PAR cette
+            // commande : un statut posé à la main (réservée, à débarrasser) ne
+            // doit pas être écrasé par un abandon.
+            if ($table !== null && $table->statut === StatutTable::Occupee) {
+                $this->tables->changerStatut($table, StatutTable::Libre);
+            }
         });
     }
 
@@ -349,6 +419,74 @@ class CommandeClientService
      * Recalcule et persiste `montant_total` = Σ (quantite × prix_unitaire) sur
      * les lignes actives.
      */
+    /**
+     * Une note encaissée ou annulée est close : plus rien ne s'y ajoute, ne
+     * s'y envoie ni ne s'y sert.
+     *
+     * @throws CommandeClientException
+     */
+    private function assertNoteModifiable(CommandeClient $commande): void
+    {
+        if ($commande->estEncaissee() || $commande->statut === StatutCommandeClient::Annulee) {
+            throw CommandeClientException::noteClose($commande->id);
+        }
+    }
+
+    /**
+     * Crée une ligne au prix figé de la carte ACTIVE du point de vente.
+     *
+     * @param  array{produit_id: int, quantite: int, commentaire?: string|null}  $data
+     *
+     * @throws CommandeClientException
+     */
+    private function creerLigne(CommandeClient $commande, array $data, ?Carbon $envoyeeLe): LigneCommandeClient
+    {
+        $commande->loadMissing('table');
+        $prixUnitaire = $this->prixSurCarteActive((int) $commande->table->point_de_vente_id, (int) $data['produit_id']);
+
+        if ($prixUnitaire === null) {
+            throw CommandeClientException::produitHorsCarte((int) $data['produit_id']);
+        }
+
+        return $commande->lignes()->create([
+            'produit_id' => $data['produit_id'],
+            'quantite' => $data['quantite'],
+            'prix_unitaire' => $prixUnitaire,
+            'commentaire' => $data['commentaire'] ?? null,
+            'statut' => Statut::Actif->value,
+            'envoyee_le' => $envoyeeLe,
+        ]);
+    }
+
+    /**
+     * Réaligne le statut de la note sur celui de ses lignes.
+     *
+     * La vérité vit désormais sur la ligne, mais le statut de la note reste
+     * exposé partout — reporting, encaissement, plan de salle. Il est donc
+     * dérivé et réécrit à chaque changement, exactement aux mêmes moments que
+     * {@see recalculerMontantTotal()}.
+     *
+     * `encaissee` et `annulee` sont des décisions explicites : elles ne se
+     * déduisent pas des lignes et ne sont jamais écrasées ici.
+     */
+    private function rafraichirStatut(CommandeClient $commande): void
+    {
+        if ($commande->estEncaissee() || $commande->statut === StatutCommandeClient::Annulee) {
+            return;
+        }
+
+        $actives = $commande->lignes()->where('statut', Statut::Actif->value)->get();
+
+        $commande->statut = match (true) {
+            $actives->isEmpty() => StatutCommandeClient::Ouverte,
+            $actives->every(fn (LigneCommandeClient $l): bool => $l->estServie()) => StatutCommandeClient::Servie,
+            $actives->contains(fn (LigneCommandeClient $l): bool => $l->estEnvoyee()) => StatutCommandeClient::EnvoyeeEnCuisine,
+            default => StatutCommandeClient::Ouverte,
+        };
+
+        $commande->save();
+    }
+
     private function recalculerMontantTotal(CommandeClient $commande): void
     {
         $total = $commande->lignes()
