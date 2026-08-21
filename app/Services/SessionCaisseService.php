@@ -70,6 +70,38 @@ class SessionCaisseService
     }
 
     /**
+     * Refuse une fermeture qui laisse un contenant sans compte.
+     *
+     * Chaque mode accepté correspond à un endroit vérifiable le soir même : on
+     * compte le tiroir, on lit le ticket du terminal. Un mode qu'on ne saurait
+     * pas contrôler n'a pas à rester actif — il se désactive dans les
+     * paramètres, et disparaît alors de la fermeture.
+     *
+     * Zéro est un compte valide et attendu ; c'est l'absence de saisie qui est
+     * refusée.
+     *
+     * @param  array<int, array{mode_de_paiement_id: int, montant_constate?: float|string|null}>  $declares
+     *
+     * @throws SessionCaisseException
+     */
+    private function assertTousLesContenantsComptes(SessionCaisse $session, array $declares): void
+    {
+        $comptes = collect($declares)
+            ->filter(fn (array $ligne): bool => ($ligne['montant_constate'] ?? null) !== null)
+            ->pluck('mode_de_paiement_id')
+            ->all();
+
+        $manquants = collect($session->theoriqueParMode())
+            ->reject(fn (array $ligne): bool => in_array($ligne['mode']->id, $comptes, true))
+            ->map(fn (array $ligne): string => $ligne['mode']->libelle)
+            ->all();
+
+        if ($manquants !== []) {
+            throw SessionCaisseException::rapprochementIncomplet($manquants);
+        }
+    }
+
+    /**
      * Fige un rapprochement par mode de paiement actif, et renvoie le total
      * constaté dans le TIROIR — ou null si personne n'y a rien compté.
      *
@@ -163,6 +195,8 @@ class SessionCaisseService
         if ($impayees->isNotEmpty()) {
             throw SessionCaisseException::notesNonReglees($session->id, $impayees->count());
         }
+
+        $this->assertTousLesContenantsComptes($session, $data['rapprochements'] ?? []);
 
         return DB::transaction(function () use ($session, $data, $userId): SessionCaisse {
             $tiroir = $this->figerRapprochements($session, $data['rapprochements'] ?? []);

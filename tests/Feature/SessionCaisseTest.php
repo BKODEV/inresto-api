@@ -41,11 +41,19 @@ function actingAsSessionUser(array $permissions = []): User
  */
 function tiroirCompte(float $montant, ?ModeDePaiement $mode = null): array
 {
-    $mode ??= ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
+    $mode ??= ModeDePaiement::query()->where('statut', 'actif')->orderBy('ordre')->orderBy('id')->first()
+        ?? ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
 
-    return ['rapprochements' => [
-        ['mode_de_paiement_id' => $mode->id, 'montant_constate' => $montant],
-    ]];
+    // La fermeture exige un compte par contenant : les autres modes actifs sont
+    // déclarés à zéro, ce qui est un compte valide et non une absence.
+    return ['rapprochements' => ModeDePaiement::query()
+        ->where('statut', 'actif')
+        ->get()
+        ->map(fn (ModeDePaiement $actif): array => [
+            'mode_de_paiement_id' => $actif->id,
+            'montant_constate' => $actif->id === $mode->id ? $montant : 0,
+        ])
+        ->all()];
 }
 
 // ───────────────────────── ouverture ─────────────────────────
@@ -298,28 +306,16 @@ it('ouvre une ligne pour chaque mode actif, même sans mouvement', function () {
     // apparaître : c'est précisément l'erreur qu'on cherche.
     actingAsSessionUser(['session_caisse.update']);
     $session = SessionCaisse::factory()->create(['fonds_initial' => 0]);
-    ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
-    ModeDePaiement::factory()->horsTiroir()->create(['libelle' => 'Carte']);
+    $especes = ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
+    $carte = ModeDePaiement::factory()->horsTiroir()->create(['libelle' => 'Carte']);
     ModeDePaiement::factory()->inactif()->create(['libelle' => 'Retiré']);
-
-    postJson("/api/sessions-caisse/{$session->id}/fermer", [])
-        ->assertOk()
-        ->assertJsonCount(2, 'data.rapprochements');
-});
-
-it('laisse « non rapproché » un contenant que personne n\'a déclaré', function () {
-    actingAsSessionUser(['session_caisse.update']);
-    $session = SessionCaisse::factory()->create(['fonds_initial' => 0]);
-    $especes = ModeDePaiement::factory()->create(['libelle' => 'Espèces', 'ordre' => 1]);
-    ModeDePaiement::factory()->horsTiroir()->create(['libelle' => 'Virement', 'ordre' => 2]);
 
     postJson("/api/sessions-caisse/{$session->id}/fermer", ['rapprochements' => [
         ['mode_de_paiement_id' => $especes->id, 'montant_constate' => 0],
+        ['mode_de_paiement_id' => $carte->id, 'montant_constate' => 0],
     ]])
         ->assertOk()
-        ->assertJsonPath('data.rapprochements.1.montant_constate', null)
-        ->assertJsonPath('data.rapprochements.1.ecart', null)
-        ->assertJsonPath('data.rapprochements.1.ecart_sens', 'non_rapproche');
+        ->assertJsonCount(2, 'data.rapprochements');
 });
 
 /**
@@ -461,22 +457,64 @@ it('accepte un montant_reel = 0 (caisse vide)', function () {
 });
 
 /**
- * Tous les contenants ne sont pas vérifiables le soir même : un virement arrive
- * à la banque quand il arrive. Une fermeture sans rien constater est donc
- * licite — mais elle ne prétend à aucun écart, sinon elle annoncerait un
- * manquant égal à toute la recette du service.
+ * Tout moyen de paiement accepté est vérifiable le soir même : on compte le
+ * tiroir, on lit le ticket du terminal. Fermer sans compter reviendrait à
+ * clôturer sans avoir contrôlé, et l'écart de ce contenant ne se verrait
+ * jamais. Un mode qu'on ne saurait pas vérifier se désactive.
  */
-it('ferme sans rien constater, et n\'invente alors aucun écart', function () {
+it('refuse de fermer sans avoir compté chaque contenant (422)', function () {
     actingAsSessionUser(['session_caisse.update']);
     $session = SessionCaisse::factory()->create(['fonds_initial' => 100]);
+    ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
 
     postJson("/api/sessions-caisse/{$session->id}/fermer", [])
+        ->assertStatus(422)
+        ->assertJsonPath('message', fn (string $m) => str_contains($m, 'Espèces'));
+
+    expect($session->fresh()->estOuverte())->toBeTrue();
+});
+
+it('refuse une fermeture qui oublie un seul contenant (422)', function () {
+    actingAsSessionUser(['session_caisse.update']);
+    $session = SessionCaisse::factory()->create(['fonds_initial' => 0]);
+    $especes = ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
+    ModeDePaiement::factory()->horsTiroir()->create(['libelle' => 'Carte']);
+
+    postJson("/api/sessions-caisse/{$session->id}/fermer", ['rapprochements' => [
+        ['mode_de_paiement_id' => $especes->id, 'montant_constate' => 0],
+    ]])
+        ->assertStatus(422)
+        ->assertJsonPath('message', fn (string $m) => str_contains($m, 'Carte'));
+});
+
+it('accepte un contenant compté à zéro, qui n\'est pas une absence de compte', function () {
+    actingAsSessionUser(['session_caisse.update']);
+    $session = SessionCaisse::factory()->create(['fonds_initial' => 0]);
+    $especes = ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
+
+    postJson("/api/sessions-caisse/{$session->id}/fermer", ['rapprochements' => [
+        ['mode_de_paiement_id' => $especes->id, 'montant_constate' => 0],
+    ]])
         ->assertOk()
-        ->assertJsonPath('data.statut', 'fermee')
-        ->assertJsonPath('data.montant_theorique', '100.00')
-        ->assertJsonPath('data.montant_reel', null)
-        ->assertJsonPath('data.ecart', null)
-        ->assertJsonPath('data.ecart_sens', 'non_rapproche');
+        ->assertJsonPath('data.ecart', '0.00')
+        ->assertJsonPath('data.ecart_sens', 'juste');
+});
+
+/**
+ * Un mode désactivé disparaît de la fermeture : c'est ainsi qu'on écarte un
+ * moyen de paiement qu'on n'accepte plus, plutôt qu'en laissant sa case vide.
+ */
+it('ne réclame pas de compte pour un mode désactivé', function () {
+    actingAsSessionUser(['session_caisse.update']);
+    $session = SessionCaisse::factory()->create(['fonds_initial' => 0]);
+    $especes = ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
+    ModeDePaiement::factory()->inactif()->create(['libelle' => 'Chèque']);
+
+    postJson("/api/sessions-caisse/{$session->id}/fermer", ['rapprochements' => [
+        ['mode_de_paiement_id' => $especes->id, 'montant_constate' => 0],
+    ]])
+        ->assertOk()
+        ->assertJsonCount(1, 'data.rapprochements');
 });
 
 it('refuse la fermeture d\'une session déjà fermée (409)', function () {

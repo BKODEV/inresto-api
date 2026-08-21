@@ -401,10 +401,11 @@ function sessionFermeeAvecVentes(): SessionCaisse
     ]);
 
     // Fonds 10 000 + 6 000 d'espèces + 1 000 de pourboire = 17 000 attendus dans
-    // le tiroir. Le virement n'est pas rapproché : il arrive à la banque quand
-    // il arrive.
+    // le tiroir ; le virement tombe pile. Chaque contenant doit être compté,
+    // la fermeture le refuserait sinon.
     return app(SessionCaisseService::class)->fermer($session, ['rapprochements' => [
         ['mode_de_paiement_id' => $especes->id, 'montant_constate' => 17000],
+        ['mode_de_paiement_id' => $virement->id, 'montant_constate' => 4000],
     ]]);
 }
 
@@ -434,10 +435,10 @@ it('rapproche chaque contenant et isole le chiffre d\'affaires', function () {
 });
 
 /**
- * Le virement n'est pas vérifiable le soir même. Le rapport le dit au lieu
- * d'afficher un zéro qui laisserait croire à un contrôle qui n'a pas eu lieu.
+ * Le rapport distingue ce qui dort dans le tiroir de ce qui n'y passe jamais :
+ * c'est ce qui explique qu'un tiroir presque vide puisse être juste.
  */
-it('marque « non rapproché » le contenant que personne n\'a déclaré', function () {
+it('signale les contenants qui ne passent pas par le tiroir', function () {
     $session = sessionFermeeAvecVentes();
 
     $html = app(PdfService::class)->htmlRapportFermeture($session);
@@ -445,7 +446,7 @@ it('marque « non rapproché » le contenant que personne n\'a déclaré', funct
     expect($html)
         ->toContain('Virement')
         ->toContain('hors tiroir')
-        ->toContain('Non rapproché');
+        ->toContain('4 000 XOF');
 });
 
 it('liste les pourboires à reverser, par serveur', function () {
