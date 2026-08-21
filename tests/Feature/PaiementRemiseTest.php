@@ -144,8 +144,14 @@ it('attribue le pourboire au serveur qui tient la note', function () {
         'montant_recu' => 5500,
     ])->assertCreated();
 
+    // L'identifiant est rendu en plus du nom : sans lui, aucun reversement ne
+    // pourrait s'imputer sur le solde de ce serveur.
     expect($ctx->session->pourboiresParServeur())->toBe([
-        ['serveur' => trim($user->prenom.' '.$user->nom), 'montant' => 500.0],
+        [
+            'user_id' => $user->id,
+            'serveur' => trim($user->prenom.' '.$user->nom),
+            'montant' => 500.0,
+        ],
     ]);
 });
 

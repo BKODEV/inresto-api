@@ -263,7 +263,7 @@ class SessionCaisse extends Model
      * n'appartiennent pas à l'établissement : c'est la liste qu'on lit à la
      * fermeture pour savoir combien reverser, et à qui.
      *
-     * @return array<int, array{serveur: string, montant: float}>
+     * @return array<int, array{user_id: string, serveur: string, montant: float}>
      */
     public function pourboiresParServeur(): array
     {
@@ -274,9 +274,10 @@ class SessionCaisse extends Model
             ->where('paiements.pourboire', '>', 0)
             ->groupBy('u.id', 'u.prenom', 'u.nom')
             ->orderByDesc('montant')
-            ->selectRaw("TRIM(CONCAT(u.prenom, ' ', u.nom)) as serveur, SUM(paiements.pourboire) as montant")
+            ->selectRaw("u.id as user_id, TRIM(CONCAT(u.prenom, ' ', u.nom)) as serveur, SUM(paiements.pourboire) as montant")
             ->get()
             ->map(fn ($ligne): array => [
+                'user_id' => (string) $ligne->user_id,
                 'serveur' => (string) $ligne->serveur,
                 'montant' => round((float) $ligne->montant, 2),
             ])

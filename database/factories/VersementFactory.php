@@ -36,6 +36,15 @@ class VersementFactory extends Factory
         return $this->state(['apres_fermeture' => true]);
     }
 
+    /** Reversement de pourboires : la seule destination qui éteint une dette. */
+    public function auPersonnel(User $beneficiaire): static
+    {
+        return $this->state([
+            'destination' => DestinationVersement::Personnel->value,
+            'beneficiaire_id' => $beneficiaire->id,
+        ]);
+    }
+
     public function versLaBanque(): static
     {
         return $this->state([

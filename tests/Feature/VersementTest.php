@@ -277,3 +277,134 @@ it('inscrit le versement au journal d\'activité', function () {
         ->assertJsonPath('data.evenements.0.libelle', 'Versement — Banque')
         ->assertJsonPath('data.evenements.0.montant', 50000);
 });
+
+// ───────────────────────── pourboires reversés ─────────────────────────
+
+/**
+ * Deux champs, deux questions. `remis_a` dit qui a EMPORTÉ l'argent — une
+ * société de collecte, un convoyeur. `beneficiaire_id` dit de quel SOLDE il se
+ * retire, ce qu'un nom écrit à la main ne permettrait pas de calculer.
+ */
+it('exige un bénéficiaire pour un reversement de pourboires (422)', function () {
+    actingAsVersementUser(['versement.create']);
+    $caisse = Caisse::factory()->create();
+    SessionCaisse::factory()->create(['caisse_id' => $caisse->id]);
+
+    postJson("/api/caisses/{$caisse->id}/versements", [
+        'montant' => 5000, 'destination' => 'personnel',
+    ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('beneficiaire_id');
+});
+
+it('refuse un bénéficiaire sur une destination qui ne doit rien à personne (422)', function () {
+    // Posé par erreur sur un dépôt bancaire, il effacerait la dette d'un serveur.
+    $serveur = User::factory()->create();
+    actingAsVersementUser(['versement.create']);
+    $caisse = Caisse::factory()->create();
+    SessionCaisse::factory()->create(['caisse_id' => $caisse->id]);
+
+    postJson("/api/caisses/{$caisse->id}/versements", [
+        'montant' => 5000, 'destination' => 'banque', 'beneficiaire_id' => $serveur->id,
+    ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('beneficiaire_id');
+});
+
+it('laisse une société de collecte emporter les fonds sans lui devoir quoi que ce soit', function () {
+    actingAsVersementUser(['versement.create']);
+    $caisse = Caisse::factory()->create();
+    SessionCaisse::factory()->create(['caisse_id' => $caisse->id]);
+
+    postJson("/api/caisses/{$caisse->id}/versements", [
+        'montant' => 500000,
+        'destination' => 'banque',
+        'remis_a' => 'Brinks — convoyeur Yao K.',
+        'reference' => 'BD-4471',
+    ])
+        ->assertCreated()
+        ->assertJsonPath('data.remis_a', 'Brinks — convoyeur Yao K.')
+        ->assertJsonPath('data.beneficiaire_id', null);
+});
+
+// ───────────────────────── solde des pourboires ─────────────────────────
+
+/**
+ * Un solde et non un instantané : le rapport de fermeture dit ce qu'une session
+ * a généré, ce qui ne sert à rien trois jours plus tard si personne n'a
+ * reversé. La dette court à travers les sessions.
+ */
+it('court le solde des pourboires à travers les sessions', function () {
+    $ctx = salleContext();
+    $serveur = actingAsServeur($ctx->site, ['paiement.create', 'session_caisse.utiliser']);
+    $mode = ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
+
+    foreach ([1000, 500] as $pourboire) {
+        $commande = commandeServieAvecLigne($ctx, $serveur, 5000, 1);
+        postJson("/api/commandes-client/{$commande->id}/paiements", [
+            'mode_de_paiement_id' => $mode->id,
+            'montant' => 5000,
+            'pourboire' => $pourboire,
+        ])->assertCreated();
+    }
+
+    $gerant = actingAsVersementUser(['versement.view']);
+    $gerant->sites()->attach($ctx->site->id);
+
+    getJson('/api/pourboires/soldes')
+        ->assertOk()
+        ->assertJsonPath('data.soldes.0.user_id', $serveur->id)
+        ->assertJsonPath('data.soldes.0.encaisse', 1500)
+        ->assertJsonPath('data.soldes.0.reverse', 0)
+        ->assertJsonPath('data.soldes.0.solde', 1500);
+});
+
+it('éteint la dette au fil des reversements', function () {
+    $ctx = salleContext();
+    $serveur = actingAsServeur($ctx->site, ['paiement.create', 'session_caisse.utiliser']);
+    $mode = ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
+    $commande = commandeServieAvecLigne($ctx, $serveur, 5000, 1);
+    postJson("/api/commandes-client/{$commande->id}/paiements", [
+        'mode_de_paiement_id' => $mode->id, 'montant' => 5000, 'pourboire' => 1200,
+    ])->assertCreated();
+
+    $gerant = actingAsVersementUser(['versement.view', 'versement.create']);
+    $gerant->sites()->attach($ctx->site->id);
+
+    postJson("/api/caisses/{$ctx->caisse->id}/versements", [
+        'montant' => 800, 'destination' => 'personnel', 'beneficiaire_id' => $serveur->id,
+    ])->assertCreated();
+
+    getJson('/api/pourboires/soldes')
+        ->assertOk()
+        ->assertJsonPath('data.soldes.0.encaisse', 1200)
+        ->assertJsonPath('data.soldes.0.reverse', 800)
+        ->assertJsonPath('data.soldes.0.solde', 400);
+});
+
+it('ne compte comme reversement que ce qui va au personnel', function () {
+    // Un dépôt au coffre n'éteint la dette de personne.
+    $ctx = salleContext();
+    $serveur = actingAsServeur($ctx->site, ['paiement.create', 'session_caisse.utiliser']);
+    $mode = ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
+    $commande = commandeServieAvecLigne($ctx, $serveur, 5000, 1);
+    postJson("/api/commandes-client/{$commande->id}/paiements", [
+        'mode_de_paiement_id' => $mode->id, 'montant' => 5000, 'pourboire' => 1000,
+    ])->assertCreated();
+
+    $gerant = actingAsVersementUser(['versement.view', 'versement.create']);
+    $gerant->sites()->attach($ctx->site->id);
+    postJson("/api/caisses/{$ctx->caisse->id}/versements", [
+        'montant' => 1000, 'destination' => 'coffre',
+    ])->assertCreated();
+
+    getJson('/api/pourboires/soldes')
+        ->assertOk()
+        ->assertJsonPath('data.soldes.0.solde', 1000);
+});
+
+it('refuse la lecture des soldes sans la permission', function () {
+    actingAsVersementUser(['paiement.view']);
+
+    getJson('/api/pourboires/soldes')->assertForbidden();
+});

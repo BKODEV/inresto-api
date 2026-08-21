@@ -27,6 +27,7 @@ class Versement extends Model
     protected $fillable = [
         'caisse_id',
         'session_caisse_id',
+        'beneficiaire_id',
         'montant',
         'apres_fermeture',
         'destination',
@@ -55,6 +56,16 @@ class Versement extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * Celui dont ce versement éteint la dette — un serveur qu'on paie de ses
+     * pourboires. Distinct de `remis_a`, qui dit qui a EMPORTÉ l'argent : une
+     * société de collecte emporte sans qu'on lui doive rien.
+     */
+    public function beneficiaire(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'beneficiaire_id');
     }
 
     /** Sorti pendant que la caisse tournait, par opposition à après sa clôture. */

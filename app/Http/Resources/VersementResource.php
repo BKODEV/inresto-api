@@ -21,6 +21,11 @@ class VersementResource extends JsonResource
             'montant' => $this->montant,
             'destination' => $this->destination->value,
             'destination_libelle' => $this->destination->libelle(),
+            'beneficiaire_id' => $this->beneficiaire_id,
+            'beneficiaire' => $this->whenLoaded(
+                'beneficiaire',
+                fn (): ?string => trim($this->beneficiaire->prenom.' '.$this->beneficiaire->nom),
+            ),
             'remis_a' => $this->remis_a,
             'reference' => $this->reference,
             'notes' => $this->notes,

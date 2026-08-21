@@ -27,6 +27,7 @@ use App\Http\Controllers\Api\PasswordResetController;
 use App\Http\Controllers\Api\PdfController;
 use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\PointDeVenteController;
+use App\Http\Controllers\Api\PourboireController;
 use App\Http\Controllers\Api\ProduitController;
 use App\Http\Controllers\Api\PublicMenuController;
 use App\Http\Controllers\Api\ReceptionController;
@@ -199,6 +200,8 @@ Route::middleware('auth:sanctum')->group(function () {
         ->parameters(['sessions-caisse' => 'session']);
     Route::post('sessions-caisse/{session}/fermer', [SessionCaisseController::class, 'fermer'])
         ->name('sessions-caisse.fermer');
+    Route::get('pourboires/soldes', [PourboireController::class, 'soldes'])
+        ->name('pourboires.soldes');
     Route::get('caisses/{caisse}/versements', [VersementController::class, 'index'])
         ->name('caisses.versements.index');
     Route::post('caisses/{caisse}/versements', [VersementController::class, 'store'])

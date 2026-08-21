@@ -23,7 +23,7 @@ use Illuminate\Support\Facades\DB;
 class VersementService
 {
     /**
-     * @param  array{montant: float|string, destination: string, remis_a?: string|null, reference?: string|null, notes?: string|null}  $data
+     * @param  array{montant: float|string, destination: string, beneficiaire_id?: string|null, remis_a?: string|null, reference?: string|null, notes?: string|null}  $data
      *
      * @throws VersementException
      */
@@ -42,6 +42,7 @@ class VersementService
                 'apres_fermeture' => ! $session->estOuverte(),
                 'montant' => $data['montant'],
                 'destination' => $data['destination'],
+                'beneficiaire_id' => $data['beneficiaire_id'] ?? null,
                 'remis_a' => $data['remis_a'] ?? null,
                 'reference' => $data['reference'] ?? null,
                 'notes' => $data['notes'] ?? null,
@@ -50,7 +51,7 @@ class VersementService
             $versement->date_heure = now();
             $versement->save();
 
-            return $versement->load(['caisse', 'user']);
+            return $versement->load(['caisse', 'user', 'beneficiaire']);
         });
     }
 
