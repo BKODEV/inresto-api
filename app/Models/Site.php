@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * Site d'exploitation. Chaque site a SA cuisine, donc SON stock et SON budget,
@@ -40,6 +41,15 @@ class Site extends Model
     public function pointsDeVente(): HasMany
     {
         return $this->hasMany(PointDeVente::class);
+    }
+
+    /**
+     * Fiche d'établissement du site : identité sur les documents, devise,
+     * tolérance d'écart de caisse. `site_id` est unique en base, d'où le hasOne.
+     */
+    public function parametreEtablissement(): HasOne
+    {
+        return $this->hasOne(ParametreEtablissement::class);
     }
 
     public function stocks(): HasMany

@@ -18,7 +18,11 @@ use Illuminate\Http\Request;
 class SessionCaisseController extends Controller
 {
     /** Relations chargées pour une session complète (caisse → PDV → site). */
-    private const RELATIONS = ['caisse.pointDeVente.site', 'user'];
+    /**
+     * La fiche d'établissement remonte jusqu'ici pour la tolérance d'écart :
+     * {@see SessionCaisseResource} la lit sans déclencher de requête.
+     */
+    private const RELATIONS = ['caisse.pointDeVente.site.parametreEtablissement', 'user'];
 
     public function __construct(private readonly SessionCaisseService $service) {}
 

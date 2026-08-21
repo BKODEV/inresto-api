@@ -30,6 +30,9 @@ class StoreParametreEtablissementRequest extends FormRequest
         return [
             'nom_commercial' => ['required', 'string', 'max:255'],
             'devise' => ['required', 'string', 'max:10'],
+            // Montant sous lequel un écart de fermeture est réputé normal.
+            // 0 = règle désactivée, tout écart non nul est signalé.
+            'tolerance_ecart_caisse' => ['sometimes', 'numeric', 'min:0'],
             'slogan' => ['nullable', 'string', 'max:255'],
             'adresse' => ['nullable', 'string'],
             'telephone' => ['nullable', 'string', 'max:255'],

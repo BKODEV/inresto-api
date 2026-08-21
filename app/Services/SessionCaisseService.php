@@ -13,10 +13,13 @@ use Illuminate\Support\Facades\DB;
  * Cycle de vie d'une session de caisse : ouverture (une seule ouverte par
  * caisse) et fermeture (rapprochement réel/théorique, calcul de l'écart).
  *
- * `montant_theorique` agrège `fonds_initial + Σ paiements de la session`, via
- * {@see SessionCaisse::montantPaye()}. Le rapprochement est donc réel : un
- * paiement enregistré compte immédiatement comme de l'argent en tiroir, ce qui
- * suppose que le caissier saisit au moment où l'argent lui est remis.
+ * `montant_theorique` agrège `fonds_initial + Σ paiements EN TIROIR de la
+ * session`, via {@see SessionCaisse::montantEnCaisse()}. Seuls les modes marqués
+ * `compte_en_caisse` y entrent : `montant_reel` est ce que le caissier a
+ * physiquement compté, et un virement n'y figure pas.
+ *
+ * Le rapprochement suppose toujours que la saisie a lieu au moment où l'argent
+ * est remis — un paiement enregistré compte immédiatement comme en tiroir.
  *
  * POINT D'EXTENSION :
  *  - Le périmètre d'accès « utiliser une session » se remonte via
@@ -78,7 +81,7 @@ class SessionCaisseService
         }
 
         return DB::transaction(function () use ($session, $data): SessionCaisse {
-            $montantTheorique = (float) $session->fonds_initial + $session->montantPaye();
+            $montantTheorique = (float) $session->fonds_initial + $session->montantEnCaisse();
             $montantReel = (float) $data['montant_reel'];
 
             $session->montant_theorique = $montantTheorique;

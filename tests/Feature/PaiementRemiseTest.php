@@ -128,7 +128,7 @@ it('gère un paiement fractionné : reste_a_payer correct', function () {
     expect($commande->resteAPayer())->toBe(15.0);
 });
 
-it('câble SessionCaisse::montantPaye() sur les paiements de la session', function () {
+it('câble SessionCaisse::montantEnCaisse() sur les paiements de la session', function () {
     $ctx = salleContext();
     $user = actingAsServeur($ctx->site, ['paiement.create', 'session_caisse.utiliser']);
     $commande = commandeServieAvecLigne($ctx, $user, 80, 1);
@@ -136,7 +136,29 @@ it('câble SessionCaisse::montantPaye() sur les paiements de la session', functi
 
     postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $mode->id, 'montant' => 80])->assertCreated();
 
-    expect($ctx->session->montantPaye())->toBe(80.0);
+    expect($ctx->session->montantEnCaisse())->toBe(80.0);
+});
+
+/**
+ * Le tiroir ne contient que l'argent des modes qui y atterrissent. Un virement
+ * est bien encaissé — la note est réglée — mais personne ne le retrouve en
+ * comptant la caisse.
+ */
+it('sépare l\'argent du tiroir de celui qui n\'y passe pas', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['paiement.create', 'session_caisse.utiliser']);
+    $commande = commandeServieAvecLigne($ctx, $user, 100, 1);
+    $especes = ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
+    $virement = ModeDePaiement::factory()->horsTiroir()->create(['libelle' => 'Virement']);
+
+    postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $especes->id, 'montant' => 30])->assertCreated();
+    postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $virement->id, 'montant' => 70])->assertCreated();
+
+    expect($ctx->session->montantEnCaisse())->toBe(30.0)
+        ->and($ctx->session->montantHorsCaisse())->toBe(70.0);
+
+    // La note, elle, est bien soldée : le filtre ne vaut que pour le tiroir.
+    expect($commande->resteAPayer())->toBe(0.0);
 });
 
 // ───────────────────────── remises ─────────────────────────

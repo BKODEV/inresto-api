@@ -37,11 +37,20 @@ class ParametreEtablissement extends Model
         'rccm',
         'regime_fiscal',
         'devise',
+        'tolerance_ecart_caisse',
         'mentions_pied_page',
+    ];
+
+    protected $casts = [
+        'tolerance_ecart_caisse' => 'decimal:2',
     ];
 
     protected $attributes = [
         'devise' => 'XOF',
+        // 0 = pas de tolérance, tout écart de fermeture non nul est signalé.
+        // Comme pour la devise, le défaut vit ici en plus de la base : sinon
+        // l'instance fraîchement créée renvoie null avant d'être relue.
+        'tolerance_ecart_caisse' => 0,
     ];
 
     public function site(): BelongsTo
