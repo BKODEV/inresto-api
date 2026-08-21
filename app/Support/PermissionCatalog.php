@@ -70,6 +70,8 @@ final class PermissionCatalog
                 'session_caisse.utiliser' => 'Utiliser une session de caisse',
                 ...self::crud('commande_client', 'les commandes client'),
                 'commande_client.encaisser' => 'Encaisser une commande client',
+                'versement.view' => 'Consulter les versements de caisse',
+                'versement.create' => 'Sortir de l\'argent du tiroir (coffre, banque, direction)',
                 'paiement.view' => 'Consulter les paiements',
                 'paiement.create' => 'Enregistrer des paiements',
                 'remise.view' => 'Consulter les remises',

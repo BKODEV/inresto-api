@@ -19,7 +19,7 @@ use Illuminate\Validation\Rule;
 class IndexJournalRequest extends FormRequest
 {
     /** Types d'événements assemblés par {@see JournalService}. */
-    public const TYPES = ['annulation', 'remise', 'paiement', 'encaissement', 'impression'];
+    public const TYPES = ['annulation', 'remise', 'paiement', 'versement', 'encaissement', 'impression'];
 
     public function authorize(): bool
     {

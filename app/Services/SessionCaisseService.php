@@ -61,6 +61,7 @@ class SessionCaisseService
             $session->user_id = $userId;
             $session->statut = StatutSessionCaisse::Ouverte;
             $session->ouvert_le = now();
+            $session->ecart_ouverture = $this->ecartDeTransition($caisseId, (float) $session->fonds_initial);
             $session->save();
 
             $this->reporterNotesEnCours($caisseId, $session);
@@ -134,6 +135,39 @@ class SessionCaisseService
         }
 
         return $tiroir;
+    }
+
+    /**
+     * Ce qui manque — ou ce qui est en trop — entre deux services.
+     *
+     * On attend de retrouver dans le tiroir ce que la session précédente y a
+     * laissé, moins ce qui en est sorti depuis. Un passage de main à main entre
+     * caissiers donne zéro ; un versement qui explique exactement la différence
+     * aussi. Tout le reste est à justifier.
+     *
+     * Le montant n'est ni imposé ni contrôlé à la saisie : le caissier compte et
+     * déclare, le système compare ensuite. Lui souffler le montant attendu
+     * l'inviterait à le recopier sans ouvrir le tiroir, et la comparaison ne
+     * vaudrait plus rien.
+     *
+     * Null quand il n'y a rien à comparer : première session de la caisse, ou
+     * précédente fermée sans que le tiroir ait été compté.
+     */
+    private function ecartDeTransition(int $caisseId, float $fondsInitial): ?float
+    {
+        $precedente = SessionCaisse::query()
+            ->where('caisse_id', $caisseId)
+            ->where('statut', StatutSessionCaisse::Fermee->value)
+            ->orderByDesc('ferme_le')
+            ->first();
+
+        if ($precedente?->montant_reel === null) {
+            return null;
+        }
+
+        $attendu = (float) $precedente->montant_reel - $precedente->montantVerseApresFermeture();
+
+        return round($fondsInitial - $attendu, 2);
     }
 
     /**

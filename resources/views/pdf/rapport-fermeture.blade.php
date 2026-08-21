@@ -135,6 +135,46 @@
     </table>
 
 
+    @php($versements = collect($rapport['versements']))
+    @if ($versements->isNotEmpty())
+        {{-- Argent sorti du tiroir : c'est ce qui explique qu'on y trouve moins
+             que ce qu'on a encaissé. --}}
+        <div class="section">VERSEMENTS</div>
+        <table>
+            @foreach ($versements as $versement)
+                <tr>
+                    <td>
+                        {{ optional($versement->date_heure)->format('H:i') }}
+                        {{ $versement->destination->libelle() }}
+                        @if ($versement->apres_fermeture)
+                            <span class="muted">(après clôture)</span>
+                        @endif
+                    </td>
+                    <td class="num">− {{ Devise::formater((float) $versement->montant, $devise) }}</td>
+                </tr>
+                @if ($versement->remis_a)
+                    <tr>
+                        <td colspan="2" class="muted">&nbsp;&nbsp;remis à {{ $versement->remis_a }}</td>
+                    </tr>
+                @endif
+            @endforeach
+        </table>
+        <div class="sep"></div>
+    @endif
+
+    @if ($session->ecart_ouverture !== null && (float) $session->ecart_ouverture !== 0.0)
+        {{-- Le tiroir n'a pas repris ce que la session précédente y avait
+             laissé, versements déduits. Signalé, jamais bloquant. --}}
+        <div class="section">TRANSITION À L'OUVERTURE</div>
+        <table>
+            <tr class="total">
+                <td>Écart non justifié</td>
+                <td class="num">{{ Devise::formater((float) $session->ecart_ouverture, $devise) }}</td>
+            </tr>
+        </table>
+        <div class="sep"></div>
+    @endif
+
     @if (! empty($rapport['pourboires_par_serveur']))
         <div class="sep"></div>
         {{-- Cet argent est dans le tiroir mais n'appartient pas à

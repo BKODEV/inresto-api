@@ -47,6 +47,7 @@ class SessionCaisse extends Model
         'ouvert_le' => 'datetime',
         'ferme_le' => 'datetime',
         'fonds_initial' => 'decimal:2',
+        'ecart_ouverture' => 'decimal:2',
         'montant_theorique' => 'decimal:2',
         'montant_reel' => 'decimal:2',
         'ecart' => 'decimal:2',
@@ -133,7 +134,31 @@ class SessionCaisse extends Model
      */
     public function montantEnCaisse(): float
     {
-        return $this->sommePaiements(true);
+        return round($this->sommePaiements(true) - $this->montantVerseEnService(), 2);
+    }
+
+    /** Versements rattachés à cette session, en service comme après fermeture. */
+    public function versements(): HasMany
+    {
+        return $this->hasMany(Versement::class, 'session_caisse_id');
+    }
+
+    /**
+     * Argent sorti du tiroir PENDANT le service. Se retranche du théorique :
+     * il a quitté la caisse, personne ne le retrouvera en comptant.
+     */
+    public function montantVerseEnService(): float
+    {
+        return round((float) $this->versements()->where('apres_fermeture', false)->sum('montant'), 2);
+    }
+
+    /**
+     * Argent sorti APRÈS la fermeture, en route vers la session suivante. Ne
+     * touche pas au rapprochement de celle-ci — il explique celui de l'autre.
+     */
+    public function montantVerseApresFermeture(): float
+    {
+        return round((float) $this->versements()->where('apres_fermeture', true)->sum('montant'), 2);
     }
 
     /** Rapprochements figés à la fermeture, un par mode de paiement actif. */
@@ -154,6 +179,9 @@ class SessionCaisse extends Model
      * un mode plutôt qu'au tiroir en bloc permet de comparer chaque contenant à
      * ce qu'on y compte, le caissier ne pouvant pas séparer le fonds du reste
      * des espèces qu'il a en main.
+     *
+     * Les versements faits en service s'en retranchent, au même endroit et pour
+     * la même raison : cet argent est sorti du tiroir, on ne le comptera pas.
      *
      * @return array<int, array{mode: ModeDePaiement, theorique: float}>
      */
@@ -177,7 +205,9 @@ class SessionCaisse extends Model
             'mode' => $mode,
             'theorique' => round(
                 (float) ($encaisse[$mode->id] ?? 0)
-                + ($mode->id === $porteurDuFonds ? (float) $this->fonds_initial : 0.0),
+                + ($mode->id === $porteurDuFonds
+                    ? (float) $this->fonds_initial - $this->montantVerseEnService()
+                    : 0.0),
                 2
             ),
         ])->all();

@@ -20,6 +20,10 @@ class SessionCaisseResource extends JsonResource
             'user_id' => $this->user_id,
             'ouvert_le' => $this->ouvert_le?->toIso8601String(),
             'fonds_initial' => $this->fonds_initial,
+            // Ce qui manque entre le compte de la session précédente et
+            // l'ouverture de celle-ci, versements déduits. Null = rien à
+            // comparer ; zéro = transition conforme.
+            'ecart_ouverture' => $this->ecart_ouverture,
             'ferme_le' => $this->ferme_le?->toIso8601String(),
             'montant_theorique' => $this->montant_theorique,
             'montant_reel' => $this->montant_reel,

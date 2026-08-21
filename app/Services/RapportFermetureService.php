@@ -52,6 +52,13 @@ class RapportFermetureService
                 ->values()
                 ->all(),
             'total_pourboires' => $session->totalPourboires(),
+            // Sorties du tiroir pendant le service : elles expliquent qu'un
+            // théorique soit plus bas que la recette encaissée.
+            'versements' => $session->versements()
+                ->with('user')
+                ->orderBy('date_heure')
+                ->get()
+                ->all(),
             'pourboires_par_serveur' => $session->pourboiresParServeur(),
             'gestes' => $this->gestesSensibles($session),
         ];

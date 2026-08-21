@@ -11,6 +11,7 @@ use App\Models\Paiement;
 use App\Models\Remise;
 use App\Models\SessionCaisse;
 use App\Models\User;
+use App\Models\Versement;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -65,6 +66,9 @@ class JournalService
         }
         if ($retenu('encaissement')) {
             $evenements = $evenements->concat($this->encaissements($debut, $fin, $sites, $pointDeVenteId));
+        }
+        if ($retenu('versement')) {
+            $evenements = $evenements->concat($this->versements($debut, $fin, $sites, $pointDeVenteId));
         }
         if ($retenu('impression')) {
             $evenements = $evenements->concat($this->impressions($debut, $fin, $sites, $pointDeVenteId));
@@ -211,6 +215,40 @@ class JournalService
                 'montant' => (float) $c->montant_total,
                 'motif' => null,
                 'detail' => 'Table '.($c->table_numero ?? '—'),
+            ]);
+    }
+
+    /**
+     * Sorties d'argent du tiroir. Le geste sensible par excellence : de
+     * l'argent quitte la caisse sans qu'aucune vente ne s'y oppose.
+     *
+     * Le périmètre passe par la caisse et non par une table, une session n'ayant
+     * pas de commande à remonter.
+     *
+     * @param  int[]|null  $sites
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function versements(Carbon $debut, Carbon $fin, ?array $sites, ?int $pointDeVenteId): Collection
+    {
+        return Versement::query()
+            ->with('user')
+            ->whereBetween('date_heure', [$debut, $fin])
+            ->whereHas('caisse.pointDeVente', function (Builder $pdv) use ($sites, $pointDeVenteId): void {
+                $pdv->when($sites !== null, fn (Builder $q) => $q->whereIn('site_id', $sites))
+                    ->when($pointDeVenteId !== null, fn (Builder $q) => $q->where('id', $pointDeVenteId));
+            })
+            ->orderByDesc('date_heure')
+            ->limit(self::LIMITE_SOURCE)
+            ->get()
+            ->map(fn (Versement $v): array => [
+                'type' => 'versement',
+                'date_heure' => $v->date_heure,
+                'auteur' => self::auteur($v->user),
+                'libelle' => 'Versement — '.$v->destination->libelle(),
+                'reference' => 'Session #'.$v->session_caisse_id,
+                'montant' => (float) $v->montant,
+                'motif' => $v->notes,
+                'detail' => $v->remis_a,
             ]);
     }
 

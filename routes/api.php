@@ -43,6 +43,7 @@ use App\Http\Controllers\Api\SousRecetteController;
 use App\Http\Controllers\Api\StockController;
 use App\Http\Controllers\Api\TableSalleController;
 use App\Http\Controllers\Api\UserController;
+use App\Http\Controllers\Api\VersementController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function () {
@@ -198,6 +199,10 @@ Route::middleware('auth:sanctum')->group(function () {
         ->parameters(['sessions-caisse' => 'session']);
     Route::post('sessions-caisse/{session}/fermer', [SessionCaisseController::class, 'fermer'])
         ->name('sessions-caisse.fermer');
+    Route::get('caisses/{caisse}/versements', [VersementController::class, 'index'])
+        ->name('caisses.versements.index');
+    Route::post('caisses/{caisse}/versements', [VersementController::class, 'store'])
+        ->name('caisses.versements.store');
     Route::get('sessions-caisse/{session}/rapport-fermeture', [PdfController::class, 'rapportFermeture'])
         ->name('sessions-caisse.rapport-fermeture');
 
