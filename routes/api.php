@@ -198,6 +198,8 @@ Route::middleware('auth:sanctum')->group(function () {
         ->parameters(['sessions-caisse' => 'session']);
     Route::post('sessions-caisse/{session}/fermer', [SessionCaisseController::class, 'fermer'])
         ->name('sessions-caisse.fermer');
+    Route::get('sessions-caisse/{session}/rapport-fermeture', [PdfController::class, 'rapportFermeture'])
+        ->name('sessions-caisse.rapport-fermeture');
 
     // Module Salle — Commandes client + KDS + déstockage à la vente.
     Route::apiResource('commandes-client', CommandeClientController::class)

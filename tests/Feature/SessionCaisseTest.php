@@ -221,6 +221,89 @@ it('sans tolérance configurée, le moindre écart est signalé', function () {
         ->assertJsonPath('data.ecart_sens', 'excedent');
 });
 
+// ───────────────────────── notes en suspens ─────────────────────────
+
+/**
+ * Une note servie non réglée est un impayé. Fermer par-dessus la rendrait
+ * orpheline : son argent ne compterait dans le théorique d'aucune caisse, et
+ * l'impayé disparaîtrait sans laisser de trace exploitable.
+ */
+it('refuse de fermer sur une note servie non réglée (409)', function () {
+    actingAsSessionUser(['session_caisse.update']);
+    $session = SessionCaisse::factory()->create(['fonds_initial' => 100]);
+    CommandeClient::factory()->servie()->create(['session_caisse_id' => $session->id]);
+
+    postJson("/api/sessions-caisse/{$session->id}/fermer", ['montant_reel' => 100])
+        ->assertStatus(409)
+        ->assertJsonPath('message', fn (string $m) => str_contains($m, 'non réglée'));
+
+    expect($session->fresh()->estOuverte())->toBeTrue();
+});
+
+it('laisse fermer quand la note servie a été soldée', function () {
+    actingAsSessionUser(['session_caisse.update']);
+    $session = SessionCaisse::factory()->create(['fonds_initial' => 100]);
+    CommandeClient::factory()->create([
+        'session_caisse_id' => $session->id,
+        'statut' => 'encaissee',
+    ]);
+
+    postJson("/api/sessions-caisse/{$session->id}/fermer", ['montant_reel' => 100])
+        ->assertOk()
+        ->assertJsonPath('data.statut', 'fermee');
+});
+
+/**
+ * Une table qui mange encore à l'heure de la relève est normale : elle ne doit
+ * pas retenir la caisse.
+ */
+it('laisse fermer malgré une note encore en cuisine', function () {
+    actingAsSessionUser(['session_caisse.update']);
+    $session = SessionCaisse::factory()->create(['fonds_initial' => 100]);
+    CommandeClient::factory()->envoyeeEnCuisine()->create(['session_caisse_id' => $session->id]);
+
+    postJson("/api/sessions-caisse/{$session->id}/fermer", ['montant_reel' => 100])
+        ->assertOk()
+        ->assertJsonPath('data.statut', 'fermee');
+});
+
+/**
+ * Le report a lieu à l'ouverture, faute de session d'accueil à la fermeture.
+ * Aucun argent ne suit : un paiement n'est accepté que sur une note servie,
+ * donc une note en cours n'en porte aucun.
+ */
+it('reporte sur la nouvelle session les notes laissées en cours de service', function () {
+    actingAsSessionUser(['session_caisse.create', 'session_caisse.update']);
+    $caisse = Caisse::factory()->create();
+    $ancienne = SessionCaisse::factory()->create(['caisse_id' => $caisse->id]);
+
+    $enCuisine = CommandeClient::factory()->envoyeeEnCuisine()->create(['session_caisse_id' => $ancienne->id]);
+    $encaissee = CommandeClient::factory()->create([
+        'session_caisse_id' => $ancienne->id,
+        'statut' => 'encaissee',
+    ]);
+
+    postJson("/api/sessions-caisse/{$ancienne->id}/fermer", ['montant_reel' => 0])->assertOk();
+    $nouvelle = postJson('/api/sessions-caisse', ['caisse_id' => $caisse->id])->assertCreated();
+
+    $nouvelleId = $nouvelle->json('data.id');
+    expect($enCuisine->fresh()->session_caisse_id)->toBe($nouvelleId)
+        // Une note close reste sur la session qui l'a encaissée.
+        ->and($encaissee->fresh()->session_caisse_id)->toBe($ancienne->id);
+});
+
+it('n\'emporte pas les notes en cours d\'une autre caisse', function () {
+    actingAsSessionUser(['session_caisse.create']);
+    $caisse = Caisse::factory()->create();
+    $autreCaisse = Caisse::factory()->create();
+    $autreSession = SessionCaisse::factory()->fermee()->create(['caisse_id' => $autreCaisse->id]);
+    $sienne = CommandeClient::factory()->envoyeeEnCuisine()->create(['session_caisse_id' => $autreSession->id]);
+
+    postJson('/api/sessions-caisse', ['caisse_id' => $caisse->id])->assertCreated();
+
+    expect($sienne->fresh()->session_caisse_id)->toBe($autreSession->id);
+});
+
 it('accepte un montant_reel = 0 (caisse vide)', function () {
     actingAsSessionUser(['session_caisse.update']);
     $session = SessionCaisse::factory()->create(['fonds_initial' => 0]);

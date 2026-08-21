@@ -13,9 +13,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * Paiement encaissé sur une commande client. Le total payé d'une session de
  * caisse en découle (SessionCaisse::montantPaye).
  *
- * `montant` est ce qui reste en tiroir ; `montant_recu` les espèces tendues,
- * quand il y a eu de la monnaie à rendre. La différence des deux ne s'invente
- * pas au moment d'imprimer le reçu : elle se saisit au comptoir.
+ * Trois montants, trois questions distinctes : `montant` solde la note (c'est la
+ * vente), `pourboire` reste en tiroir sans appartenir à l'établissement, et
+ * `montant_recu` est le billet tendu, dont se déduit la monnaie à rendre. Rien
+ * de tout cela ne s'invente au moment d'imprimer le reçu : tout se saisit au
+ * comptoir.
+ *
+ * Le bénéficiaire d'un pourboire est le serveur de la note (`commande.user_id`).
  */
 class Paiement extends Model
 {
@@ -29,12 +33,14 @@ class Paiement extends Model
         'mode_de_paiement_id',
         'user_id',
         'montant',
+        'pourboire',
         'montant_recu',
         'reference_externe',
     ];
 
     protected $casts = [
         'montant' => 'decimal:2',
+        'pourboire' => 'decimal:2',
         'montant_recu' => 'decimal:2',
         'date_heure' => 'datetime',
     ];

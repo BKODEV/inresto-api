@@ -32,6 +32,9 @@ class CommandeClientResource extends JsonResource
             'appartement_a_verifier' => $this->appartement_a_verifier,
             'date_heure' => $this->date_heure?->toIso8601String(),
             'statut' => $this->statut->value,
+            // Depuis quand la table attend son addition. Le serveur n'a que ce
+            // repère pour distinguer un client au comptoir d'un client parti.
+            'servie_le' => $this->servie_le?->toIso8601String(),
             // Piste d'audit de la clôture ; null tant que non encaissée.
             'encaisse_par' => $this->encaisse_par,
             'encaisse_le' => $this->encaisse_le?->toIso8601String(),

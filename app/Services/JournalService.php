@@ -9,6 +9,7 @@ use App\Models\CommandeClient;
 use App\Models\Impression;
 use App\Models\Paiement;
 use App\Models\Remise;
+use App\Models\SessionCaisse;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
@@ -219,18 +220,37 @@ class JournalService
      */
     private function impressions(Carbon $debut, Carbon $fin, ?array $sites, ?int $pointDeVenteId): Collection
     {
+        $commandeMorph = (new CommandeClient)->getMorphClass();
+        $sessionMorph = (new SessionCaisse)->getMorphClass();
+
+        $commandesDuPerimetre = CommandeClient::query()
+            ->when(true, function (Builder $commande) use ($sites, $pointDeVenteId): void {
+                $this->bornerAuPerimetre($commande, $sites, $pointDeVenteId);
+            })
+            ->select('id');
+
+        // Une session ne passe pas par `table.pointDeVente` comme une commande :
+        // son périmètre se remonte par sa caisse. Sans cette branche, le rapport
+        // de fermeture serait le seul document d'argent sans trace au journal.
+        $sessionsDuPerimetre = SessionCaisse::query()
+            ->whereHas('caisse.pointDeVente', function (Builder $pdv) use ($sites, $pointDeVenteId): void {
+                $pdv->when($sites !== null, fn (Builder $q) => $q->whereIn('site_id', $sites))
+                    ->when($pointDeVenteId !== null, fn (Builder $q) => $q->where('id', $pointDeVenteId));
+            })
+            ->select('id');
+
         return Impression::query()
             ->with('user')
             ->whereBetween('date_heure', [$debut, $fin])
-            ->where('imprimable_type', (new CommandeClient)->getMorphClass())
-            ->whereIn(
-                'imprimable_id',
-                CommandeClient::query()
-                    ->when(true, function (Builder $commande) use ($sites, $pointDeVenteId): void {
-                        $this->bornerAuPerimetre($commande, $sites, $pointDeVenteId);
-                    })
-                    ->select('id')
-            )
+            ->where(function (Builder $requete) use ($commandeMorph, $sessionMorph, $commandesDuPerimetre, $sessionsDuPerimetre): void {
+                $requete
+                    ->where(fn (Builder $q) => $q
+                        ->where('imprimable_type', $commandeMorph)
+                        ->whereIn('imprimable_id', $commandesDuPerimetre))
+                    ->orWhere(fn (Builder $q) => $q
+                        ->where('imprimable_type', $sessionMorph)
+                        ->whereIn('imprimable_id', $sessionsDuPerimetre));
+            })
             ->orderByDesc('date_heure')
             ->limit(self::LIMITE_SOURCE)
             ->get()
@@ -239,7 +259,9 @@ class JournalService
                 'date_heure' => $i->date_heure,
                 'auteur' => self::auteur($i->user),
                 'libelle' => $i->type->libelle().' imprimé(e)',
-                'reference' => 'Commande #'.$i->imprimable_id,
+                'reference' => $i->imprimable_type === $sessionMorph
+                    ? 'Session #'.$i->imprimable_id
+                    : 'Commande #'.$i->imprimable_id,
                 'montant' => null,
                 'motif' => null,
                 'detail' => null,

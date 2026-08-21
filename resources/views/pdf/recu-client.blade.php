@@ -17,9 +17,15 @@
     // portait la monnaie.
     $totalTendu = $commande->paiements->sum(fn ($p) => (float) ($p->montant_recu ?? $p->montant));
 
+    // Ce que le client a laissé au serveur : dans le tiroir, mais pas rendu.
+    $pourboire = round((float) $commande->paiements->sum('pourboire'), 2);
+
     // Positive uniquement quand il y a eu de la monnaie à rendre. N'a de sens
     // que sur le reçu : une addition qui annoncerait la monnaie serait absurde.
-    $monnaie = round($totalTendu - $commande->montantDu(), 2);
+    //
+    // Le pourboire se retranche du tendu, sans quoi le ticket annoncerait au
+    // client une monnaie qu'il ne recevra pas — il l'a laissée.
+    $monnaie = round($totalTendu - $commande->montantDu() - $pourboire, 2);
 @endphp
 <!DOCTYPE html>
 <html lang="fr">
@@ -95,6 +101,13 @@
                     <td class="num">{{ Devise::formater((float) $paiement->montant, $devise) }}</td>
                 </tr>
             @endforeach
+
+            @if ($pourboire > 0)
+                <tr>
+                    <td>Dont pourboire</td>
+                    <td class="num">{{ Devise::formater($pourboire, $devise) }}</td>
+                </tr>
+            @endif
 
             @if ($monnaie > 0)
                 <tr>

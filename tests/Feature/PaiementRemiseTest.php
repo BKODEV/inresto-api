@@ -100,6 +100,118 @@ it('accepte un paiement sans espèces tendues (carte, appoint juste)', function 
     ])->assertCreated()->assertJsonPath('data.montant_recu', null);
 });
 
+// ───────────────────────── pourboires ─────────────────────────
+
+/**
+ * Un pourboire est dans le tiroir mais n'appartient pas à l'établissement. Il
+ * doit donc compter dans le théorique de la session — sinon il ressort comme un
+ * excédent de caisse, c'est-à-dire comme un signal de vente non enregistrée —
+ * sans jamais solder la note ni devenir de la recette.
+ */
+it('compte le pourboire dans le tiroir sans qu\'il solde la note', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['paiement.create', 'session_caisse.utiliser']);
+    $commande = commandeServieAvecLigne($ctx, $user, 7500, 1);
+    $mode = ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
+
+    // Le client pose 10 000 sur une note de 7 500 et laisse 1 000.
+    postJson("/api/commandes-client/{$commande->id}/paiements", [
+        'mode_de_paiement_id' => $mode->id,
+        'montant' => 7500,
+        'pourboire' => 1000,
+        'montant_recu' => 10000,
+    ])->assertCreated()->assertJsonPath('data.pourboire', '1000.00');
+
+    // La note est soldée par la seule vente.
+    expect($commande->montantPaye())->toBe(7500.0)
+        ->and($commande->resteAPayer())->toBe(0.0);
+
+    // Le tiroir, lui, contient les deux.
+    expect($ctx->session->montantEnCaisse())->toBe(8500.0)
+        ->and($ctx->session->totalPourboires())->toBe(1000.0);
+});
+
+it('attribue le pourboire au serveur qui tient la note', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['paiement.create', 'session_caisse.utiliser']);
+    $commande = commandeServieAvecLigne($ctx, $user, 5000, 1);
+    $mode = ModeDePaiement::factory()->create();
+
+    postJson("/api/commandes-client/{$commande->id}/paiements", [
+        'mode_de_paiement_id' => $mode->id,
+        'montant' => 5000,
+        'pourboire' => 500,
+        'montant_recu' => 5500,
+    ])->assertCreated();
+
+    expect($ctx->session->pourboiresParServeur())->toBe([
+        ['serveur' => trim($user->prenom.' '.$user->nom), 'montant' => 500.0],
+    ]);
+});
+
+it('refuse un billet qui ne couvre pas la vente et le pourboire (422)', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['paiement.create', 'session_caisse.utiliser']);
+    $commande = commandeServieAvecLigne($ctx, $user, 7500, 1);
+    $mode = ModeDePaiement::factory()->create();
+
+    // 8 000 reçus ne peuvent pas couvrir 7 500 de vente ET 1 000 de pourboire.
+    postJson("/api/commandes-client/{$commande->id}/paiements", [
+        'mode_de_paiement_id' => $mode->id,
+        'montant' => 7500,
+        'pourboire' => 1000,
+        'montant_recu' => 8000,
+    ])->assertStatus(422)->assertJsonValidationErrors('montant_recu');
+});
+
+it('accepte un pourboire sans espèces tendues (paiement par carte)', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['paiement.create', 'session_caisse.utiliser']);
+    $commande = commandeServieAvecLigne($ctx, $user, 5000, 1);
+    $mode = ModeDePaiement::factory()->create();
+
+    postJson("/api/commandes-client/{$commande->id}/paiements", [
+        'mode_de_paiement_id' => $mode->id,
+        'montant' => 5000,
+        'pourboire' => 750,
+    ])->assertCreated()->assertJsonPath('data.pourboire', '750.00');
+
+    expect($ctx->session->montantEnCaisse())->toBe(5750.0);
+});
+
+it('laisse le pourboire à zéro quand il n\'est pas fourni', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['paiement.create', 'session_caisse.utiliser']);
+    $commande = commandeServieAvecLigne($ctx, $user, 50, 1);
+    $mode = ModeDePaiement::factory()->create();
+
+    postJson("/api/commandes-client/{$commande->id}/paiements", [
+        'mode_de_paiement_id' => $mode->id,
+        'montant' => 50,
+    ])->assertCreated()->assertJsonPath('data.pourboire', '0.00');
+
+    expect($ctx->session->totalPourboires())->toBe(0.0);
+});
+
+it('ne compte pas dans le tiroir le pourboire d\'un mode hors tiroir', function () {
+    // Un pourboire sur virement existe (il est dû au serveur) mais n'est pas
+    // dans la main du caissier le soir venu.
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['paiement.create', 'session_caisse.utiliser']);
+    $commande = commandeServieAvecLigne($ctx, $user, 5000, 1);
+    $virement = ModeDePaiement::factory()->horsTiroir()->create();
+
+    postJson("/api/commandes-client/{$commande->id}/paiements", [
+        'mode_de_paiement_id' => $virement->id,
+        'montant' => 5000,
+        'pourboire' => 500,
+    ])->assertCreated();
+
+    expect($ctx->session->montantEnCaisse())->toBe(0.0)
+        ->and($ctx->session->montantHorsCaisse())->toBe(5500.0)
+        ->and($ctx->session->totalPourboires())->toBe(500.0);
+});
+
 it('refuse un paiement sur une commande ouverte (422)', function () {
     $ctx = salleContext();
     $user = actingAsServeur($ctx->site, ['paiement.create', 'session_caisse.utiliser']);

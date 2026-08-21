@@ -484,6 +484,14 @@ class CommandeClientService
             default => StatutCommandeClient::Ouverte,
         };
 
+        // Date le moment où la table s'est mise à attendre son addition : c'est
+        // le seul repère qui distingue un client au comptoir d'un client parti
+        // sans payer. Effacé si un ajout renvoie la note en cuisine — elle
+        // n'attend plus de régler, elle attend son plat.
+        $commande->servie_le = $commande->statut === StatutCommandeClient::Servie
+            ? ($commande->servie_le ?? now())
+            : null;
+
         $commande->save();
     }
 

@@ -48,6 +48,7 @@ class CommandeClient extends Model
         'date_heure' => 'datetime',
         'montant_total' => 'decimal:2',
         'statut' => StatutCommandeClient::class,
+        'servie_le' => 'datetime',
         'encaisse_le' => 'datetime',
     ];
 

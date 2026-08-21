@@ -27,4 +27,18 @@ class SessionCaisseException extends RuntimeException
     {
         return new self("La session de caisse (id: {$sessionId}) est déjà fermée.", 409);
     }
+
+    /**
+     * Des notes servies attendent encore leur règlement. Les laisser derrière
+     * une session fermée les rendrait orphelines : leur argent ne compterait
+     * dans le théorique d'aucune caisse.
+     */
+    public static function notesNonReglees(int $sessionId, int $nombre): self
+    {
+        return new self(
+            "La session de caisse (id: {$sessionId}) porte encore {$nombre} note(s) servie(s) non réglée(s) : "
+            .'soldez-les ou annulez-les avec un motif avant de fermer.',
+            409
+        );
+    }
 }

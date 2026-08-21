@@ -42,6 +42,10 @@ class SessionCaisseResource extends JsonResource
                 fn (): string => number_format($this->montantHorsCaisse(), 2, '.', ''),
             ),
             'statut' => $this->statut->value,
+            'ferme_par' => $this->whenLoaded(
+                'fermePar',
+                fn (): ?string => trim($this->fermePar->prenom.' '.$this->fermePar->nom),
+            ),
             'notes' => $this->notes,
             'caisse' => new CaisseResource($this->whenLoaded('caisse')),
             'user' => $this->whenLoaded('user', fn () => [

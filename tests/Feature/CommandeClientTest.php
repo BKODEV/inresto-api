@@ -728,6 +728,56 @@ it('expose le serveur qui a ouvert la note', function () {
         ->assertJsonPath('data.commandes.0.serveur', trim($user->prenom.' '.$user->nom));
 });
 
+/**
+ * Le seul repère dont dispose un serveur pour distinguer « le client est au
+ * comptoir » de « le client est parti sans payer ». Les lignes étaient
+ * horodatées, la note ne l'était pas.
+ */
+it('date le passage de la note à « servie »', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site);
+    $produit = produitSurCarte($ctx, 10);
+    $commande = commandeSur($ctx, $user, 'ouverte');
+
+    postJson("/api/commandes-client/{$commande->id}/envoyer-en-cuisine", [
+        'lignes' => [['produit_id' => $produit->id, 'quantite' => 1]],
+    ])->assertOk();
+
+    expect($commande->fresh()->servie_le)->toBeNull();
+
+    postJson("/api/commandes-client/{$commande->id}/servir")
+        ->assertOk()
+        ->assertJsonPath('data.servie_le', fn (?string $date) => $date !== null);
+
+    expect($commande->fresh()->servie_le)->not->toBeNull();
+});
+
+/**
+ * Une note qui repart en cuisine n'attend plus de régler : elle attend son
+ * plat. Garder l'horodatage ferait courir un compteur d'attente de paiement
+ * sur une table qui mange encore.
+ */
+it('efface l\'horodatage de service quand la note repart en cuisine', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site);
+    $produit = produitSurCarte($ctx, 10);
+    $commande = commandeSur($ctx, $user, 'ouverte');
+
+    postJson("/api/commandes-client/{$commande->id}/envoyer-en-cuisine", [
+        'lignes' => [['produit_id' => $produit->id, 'quantite' => 1]],
+    ])->assertOk();
+    postJson("/api/commandes-client/{$commande->id}/servir")->assertOk();
+
+    expect($commande->fresh()->servie_le)->not->toBeNull();
+
+    // Un second tour part en cuisine : la note n'est plus servie.
+    postJson("/api/commandes-client/{$commande->id}/envoyer-en-cuisine", [
+        'lignes' => [['produit_id' => $produit->id, 'quantite' => 1]],
+    ])->assertOk();
+
+    expect($commande->fresh()->servie_le)->toBeNull();
+});
+
 // ───────────────────────── index : filtres & pagination ─────────────────────────
 
 it('pagine l\'index et expose le total', function () {

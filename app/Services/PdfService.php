@@ -11,6 +11,7 @@ use App\Models\CommandeFournisseur;
 use App\Models\FicheTechnique;
 use App\Models\ParametreEtablissement;
 use App\Models\PointDeVente;
+use App\Models\SessionCaisse;
 use App\Models\Site;
 use App\Models\TableSalle;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -125,11 +126,48 @@ class PdfService
         CommandeClient $commande,
         TypeImpression $type = TypeImpression::Recu,
     ): Response {
-        // Largeur ticket 80mm = 226.77pt ; hauteur volontairement large, dompdf
-        // tronque au contenu. La taille est aussi déclarée en CSS (@page).
-        return Pdf::loadHTML($this->htmlTicketClient($commande, $type))
+        return $this->streamTicket80(
+            $this->htmlTicketClient($commande, $type),
+            "{$type->value}-{$commande->id}.pdf"
+        );
+    }
+
+    /**
+     * Rapport de fermeture de caisse — le « ticket Z », qui sort de la même
+     * imprimante que les reçus et se classe dans le tiroir.
+     *
+     * Le layout A4 commun n'est pas réutilisable ici : c'est, avec le ticket
+     * client, l'un des deux seuls documents autonomes du projet.
+     */
+    public function htmlRapportFermeture(SessionCaisse $session): string
+    {
+        $session->loadMissing(['caisse.pointDeVente.site.parametreEtablissement', 'user', 'fermePar']);
+
+        $site = $session->caisse?->pointDeVente?->site;
+
+        return View::make('pdf.rapport-fermeture', [
+            'rapport' => app(RapportFermetureService::class)->pour($session),
+            'parametre' => $this->parametresPourSite($site),
+        ])->render();
+    }
+
+    public function rapportFermeture(SessionCaisse $session): Response
+    {
+        return $this->streamTicket80(
+            $this->htmlRapportFermeture($session),
+            "rapport-fermeture-{$session->id}.pdf"
+        );
+    }
+
+    /**
+     * Ticket 80mm = 226.77pt de large ; hauteur volontairement généreuse,
+     * dompdf tronque au contenu. La taille est aussi déclarée en CSS (@page).
+     */
+    private function streamTicket80(string $html, string $nomFichier): Response
+    {
+        return Pdf::loadHTML($html)
             ->setPaper([0, 0, 226.77, 800])
-            ->stream("{$type->value}-{$commande->id}.pdf");
+            ->stream($nomFichier);
     }
 
     /**

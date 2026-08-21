@@ -76,7 +76,7 @@ class SessionCaisseController extends Controller
      */
     public function fermer(FermerSessionCaisseRequest $request, SessionCaisse $session): JsonResponse
     {
-        $session = $this->service->fermer($session, $request->validated());
+        $session = $this->service->fermer($session, $request->validated(), $request->user()->id);
 
         return ApiResponse::updated(
             new SessionCaisseResource($session),

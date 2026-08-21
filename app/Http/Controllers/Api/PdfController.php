@@ -11,9 +11,11 @@ use App\Models\CommandeFournisseur;
 use App\Models\FicheTechnique;
 use App\Models\Impression;
 use App\Models\PointDeVente;
+use App\Models\SessionCaisse;
 use App\Models\TableSalle;
 use App\Services\PdfService;
 use App\Support\SitePerimetre;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -84,14 +86,30 @@ class PdfController extends Controller
      * Journalisé AVANT le rendu : c'est la demande qu'on enregistre, et un
      * échec de génération du PDF ne doit pas effacer le fait qu'elle a eu lieu.
      */
-    private function journaliser(CommandeClient $commande, TypeImpression $type): void
+    private function journaliser(Model $imprimable, TypeImpression $type): void
     {
         Impression::create([
             'user_id' => request()->user()->id,
             'type' => $type->value,
-            'imprimable_type' => $commande->getMorphClass(),
-            'imprimable_id' => $commande->id,
+            'imprimable_type' => $imprimable->getMorphClass(),
+            'imprimable_id' => $imprimable->getKey(),
         ]);
+    }
+
+    /**
+     * Rapport de fermeture d'une session de caisse (ticket 80mm).
+     *
+     * Journalisé comme les documents client : il fige un rapprochement, et le
+     * ressortir après coup mérite une trace au même titre qu'une note
+     * réimprimée.
+     */
+    public function rapportFermeture(SessionCaisse $session): Response
+    {
+        $this->authorize('view', $session);
+
+        $this->journaliser($session, TypeImpression::RapportFermeture);
+
+        return $this->service->rapportFermeture($session);
     }
 
     public function ficheTechnique(Request $request, FicheTechnique $fiche_technique): Response
