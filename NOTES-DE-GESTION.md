@@ -21,6 +21,15 @@
 - [Une seule session de caisse ouverte par caisse](#une-seule-session-de-caisse-ouverte-par-caisse)
 - [Déstockage à la vente : au service, jamais bloquant](#déstockage-à-la-vente--au-service-jamais-bloquant)
 - [Encaissement, remises encadrées & annulations](#encaissement-remises-encadrées--annulations)
+- [Un mode de paiement est un contenant](#un-mode-de-paiement-est-un-contenant)
+- [Fermer une session qui porte encore des notes](#fermer-une-session-qui-porte-encore-des-notes)
+- [Le pourboire n'est pas du chiffre d'affaires](#le-pourboire-nest-pas-du-chiffre-daffaires)
+- [Versements : l'argent qui sort du tiroir](#versements--largent-qui-sort-du-tiroir)
+- [La chaîne entre deux services](#la-chaîne-entre-deux-services)
+- [Trois documents pour le client, deux gabarits](#trois-documents-pour-le-client-deux-gabarits)
+- [Le service se fait par tours](#le-service-se-fait-par-tours)
+- [Ce qu'un document imprimé fige](#ce-quun-document-imprimé-fige)
+- [Journal d'activité : on relit, on ne réécrit pas](#journal-dactivité--on-relit-on-ne-réécrit-pas)
 - [Machines à états — mémo transversal](#machines-à-états--mémo-transversal)
 - [Pilotage / Reporting : lecture seule, adossé au « vendu »](#pilotage--reporting--lecture-seule-adossé-au--vendu-)
 
@@ -632,12 +641,11 @@ ne peut pas en ouvrir une seconde sur la **même** caisse (409).
 
 ### Montant théorique & écart
 
-- `montant_theorique = fonds_initial + Σ paiements encaissés sur la session`.
-  `SessionCaisse::montantPaye()` somme les paiements des commandes rattachées à
-  la session.
-- `ecart = montant_reel − montant_theorique`. `montant_reel` est **saisi
-  obligatoirement** à la fermeture (0 accepté = caisse vide). **L'ouvreur n'a pas
-  à être le fermeur.**
+- Le théorique ne compte que **le tiroir**, et l'écart se lit **contenant par
+  contenant** → voir « Un mode de paiement est un contenant », qui porte le
+  détail du calcul.
+- `ecart = montant_reel − montant_theorique`, figé à la fermeture avec son
+  signataire (`ferme_par`) — **l'ouvreur n'a pas à être le fermeur**.
 - L'accès « utiliser une session » (créer des commandes dessus, Lot C) se remonte
   via **caisse → point de vente → site**, croisé avec `user_site` et la permission
   `session_caisse.utiliser`.
@@ -702,7 +710,7 @@ remises et des paiements.
 
 ```
 montant_du     = Σ(lignes actives : quantité × prix_unitaire) − Σ(remises)   (plancher 0)
-montant_paye   = Σ(paiements)
+montant_paye   = Σ(paiements.montant)          ← le pourboire n'y entre pas
 reste_a_payer  = montant_du − montant_paye
 ```
 
@@ -713,9 +721,10 @@ reste_a_payer  = montant_du − montant_paye
 ### Une commande encaissée est immuable
 
 Après encaissement (`servie → encaissee`), **plus aucune** ligne, remise ou
-paiement ne peut être ajouté (→ 409). L'encaissement exige `reste_a_payer = 0`
-(le surpaiement est toléré : monnaie/pourboire gérés à la main). La table passe
-alors **« à débarrasser »**.
+paiement ne peut être ajouté (→ 409). L'encaissement exige `reste_a_payer = 0`.
+Monnaie et pourboire ne sont plus « gérés à la main » : ils ont chacun leur
+colonne sur le paiement (cf. « Le pourboire n'est pas du chiffre d'affaires »).
+La table passe alors **« à débarrasser »**.
 
 ### Les remises sont encadrées par un seuil
 
@@ -751,6 +760,348 @@ libère la table.
 
 ---
 
+## Un mode de paiement est un contenant
+
+> Règles du **Module Salle / Lot D** — la fermeture de caisse.
+
+### Règle d'or
+
+Un mode de paiement ne dit pas seulement *comment* le client a payé : il dit **où
+l'argent s'accumule**. Les espèces vont dans le tiroir, la carte dans le
+terminal, le chèque dans la pochette, le virement à la banque. Rapprocher une
+caisse, c'est comparer **contenant par contenant** ce que le système attend à ce
+que quelqu'un y constate.
+
+`modes_de_paiement.compte_en_caisse` marque les modes dont l'argent finit
+**physiquement dans le tiroir** compté le soir.
+
+> **Pourquoi cette colonne ?** `montant_theorique` valait `fonds + Σ TOUS les
+> paiements`, alors que `montant_reel` est ce qu'on **compte**. Chaque virement
+> creusait donc un manquant qui n'avait jamais existé, et le système ne pouvait
+> pas s'en sortir seul : la table ne portait que `libelle` et `statut`, rien ne
+> disait la nature d'un mode.
+
+```
+montant_theorique = fonds_initial
+                  + Σ (montant + pourboire) des paiements EN TIROIR
+                  − Σ versements faits pendant le service
+```
+
+`ordre` sert deux choses : l'ordre des boutons au comptoir, et le départage
+quand plusieurs modes sont en tiroir (le premier est présélectionné).
+
+### Une ligne par mode ACTIF, pas par mode utilisé
+
+`rapprochements_caisse` reçoit une ligne pour **chaque mode actif**, même si
+personne ne l'a utilisé du service. Sans cela, une carte encaissée sur le
+terminal mais jamais saisie dans le système n'aurait aucune ligne où
+apparaître — précisément l'erreur qu'on cherche.
+
+Le théorique de chaque contenant est **figé** à la fermeture, comme l'écart de
+la session : un rapprochement est une pièce d'audit, il ne se recalcule pas
+après coup.
+
+### On ne souffle jamais le montant attendu
+
+Aucun écran ne pré-remplit ni n'affiche le théorique **avant** la saisie du
+compte — ni pour le tiroir, ni contenant par contenant, ni pour le fonds
+initial à l'ouverture.
+
+> **Pourquoi ?** Un montant affiché se recopie. Le rapprochement ne mesure alors
+> plus que la capacité du caissier à lire un écran. Compter à l'aveugle est ce
+> qui donne sa valeur à la comparaison.
+
+### Tolérance, et sens de l'écart
+
+`parametre_etablissement.tolerance_ecart_caisse` (par site, comme la devise) :
+en dessous de ce montant, l'écart est réputé normal — avec de la petite monnaie
+on ne tombe jamais pile. `0` désactive la règle. Même convention que
+`matieres_premieres.seuil_alerte_stock`.
+
+`SessionCaisse::sensEcart()` qualifie plutôt que d'afficher un nombre nu :
+`juste` · `tolere` · `excedent` · `manquant`. Un **excédent** n'est pas une
+bonne nouvelle : il signale aussi bien un rendu de monnaie oublié qu'une vente
+non enregistrée.
+
+### Tout contenant doit être compté
+
+Un restaurant classique n'accepte ni virement ni chèque : chaque mode actif
+correspond donc à un endroit vérifiable le soir même. La fermeture **refuse**
+(409) tant qu'un contenant reste sans compte. Zéro est un compte valide et
+attendu — c'est l'absence de saisie qui est refusée.
+
+> Un mode qu'on ne saurait pas contrôler n'a pas à rester actif : il se
+> **désactive** dans Paramètres → Modes de paiement, et disparaît alors de la
+> fermeture. C'est l'échappatoire prévue, pas la fermeture forcée.
+
+### La fermeture forcée
+
+Sous la permission dédiée **`session_caisse.forcer_fermeture`** (gérant, pas
+caissier), et avec un **motif obligatoire** figé dans
+`sessions_caisse.motif_forcage`. Le motif s'affiche en tête du rapport Z, pas en
+note de bas de page.
+
+Distincte de `session_caisse.update` à dessein : savoir fermer une caisse ne
+doit pas suffire à contourner le contrôle.
+
+> **Le forçage passe outre le compte, jamais l'impayé** (cf. section suivante).
+> Ce sont deux problèmes différents, une seule porte ne doit pas ouvrir les deux.
+
+---
+
+## Fermer une session qui porte encore des notes
+
+### Deux cas, deux traitements
+
+| État de la note | Sens métier | Traitement à la fermeture |
+|---|---|---|
+| `servie` **non réglée** | Le client a consommé et n'a pas payé — c'est un impayé | **Bloque (409).** Se solde ou s'annule, ne se contourne pas |
+| `ouverte` / `envoyee_en_cuisine` | La table mange encore à l'heure de la relève | **Reportée** sur la session suivante |
+
+> **Pourquoi bloquer l'impayé ?** Fermer par-dessus rendrait la note orpheline :
+> son argent ne compterait dans le théorique d'aucune session, et l'impayé
+> disparaîtrait sans laisser de trace.
+
+### Le report a lieu à l'OUVERTURE
+
+`SessionCaisseService::ouvrir()` repointe les notes encore en cours de la
+session précédente vers la nouvelle — pas à la fermeture, où la session
+d'accueil n'existe pas encore.
+
+> **Pourquoi c'est sans risque** : un paiement n'est accepté que sur une note
+> **servie**. Une note reportée n'en porte donc aucun, et la repointer ne
+> déplace pas d'argent d'une session à l'autre.
+
+---
+
+## Le pourboire n'est pas du chiffre d'affaires
+
+### Trois montants sur un paiement, trois questions
+
+| Colonne | Répond à |
+|---|---|
+| `montant` | Ce qui **solde la note** — la vente, donc le chiffre d'affaires |
+| `pourboire` | Ce qui reste en tiroir **sans appartenir à l'établissement** |
+| `montant_recu` | Le **billet tendu**, dont on déduit la monnaie à rendre |
+
+Note de 7 500, le client pose 10 000 et laisse 1 000 : `montant` 7 500,
+`pourboire` 1 000, `montant_recu` 10 000, **monnaie rendue 1 500**.
+
+### Deux exigences contradictoires en apparence
+
+1. **Le pourboire DOIT entrer dans le théorique du tiroir.** Il y est
+   physiquement. L'en exclure le ferait ressortir en **excédent de caisse** —
+   c'est-à-dire comme le signal d'une vente non enregistrée.
+2. **Il ne doit JAMAIS compter comme recette.** Le CA se lit sur les lignes de
+   commande (`Σ quantité × prix_unitaire`), où un pourboire n'a rien à faire.
+
+Le CA est donc **structurellement immunisé** : un pourboire n'étant pas une
+ligne, aucun rapport de pilotage ne peut le compter. Seule la vue **trésorerie**
+(`VentesReportService::modesPaiement()`) lit les paiements, et elle somme
+`montant` seul, en exposant les pourboires à part.
+
+`reste_a_payer` l'ignore aussi : `montantPaye()` somme `montant`, donc une note
+reste soldée par sa seule vente.
+
+### Le bénéficiaire ne demande aucune colonne
+
+C'est **`commande.user_id`**, le serveur qui tient la note. Le pourboire est
+ainsi rattaché au serveur, à la note et à la session à la fois, ce qui couvre
+les trois lectures sans rien dupliquer.
+
+Le solde dû à chacun se calcule : *encaissé sur ses tables* − *déjà reversé*.
+Le serveur peut suivre le sien sous **`pourboire.suivre_les_siens`**, une
+permission **attachée à aucun rôle par défaut** — c'est à la direction de
+décider si un serveur voit ses propres pourboires, et de l'attribuer ou de la
+retirer quand elle veut. L'API correspondante n'accepte **aucun identifiant en
+paramètre** : on ne lit que soi-même.
+
+> **Hors périmètre, assumé** : les pourboires remis de la main à la main ne
+> passent pas par la caisse et n'existent donc pas dans le système. Les écrans
+> le disent explicitement, pour qu'on ne croie pas la liste exhaustive.
+
+---
+
+## Versements : l'argent qui sort du tiroir
+
+### Règle d'or
+
+Un **versement** trace une sortie d'espèces vers le coffre, la banque, la
+direction, un tiers — ou vers un serveur, pour lui reverser ses pourboires.
+Table en **ajout seul** : un mouvement d'argent constaté ne se réécrit pas.
+
+> **Pourquoi ?** Le théorique valait `fonds + encaissé`, sans aucun terme de
+> sortie. Porter une partie de la recette au coffre en plein service creusait un
+> manquant fantôme exactement égal à la somme sortie.
+
+### Deux champs pour deux questions différentes
+
+| Champ | Question |
+|---|---|
+| `beneficiaire_id` (FK users, nullable) | **De quel solde** cet argent se retire-t-il ? |
+| `remis_a` (texte libre) | **Qui a physiquement emporté** l'argent ? |
+
+Reverser un pourboire éteint la dette d'un serveur précis : un nom écrit à la
+main ne le permet pas (« Kouassi », « K. Aké » et « kouassi ake » ne se
+recoupent pas). Les autres destinations n'ont **aucun solde** à diminuer — un
+coffre ne doit rien à personne — et se contentent de `remis_a`, qui accueille
+très bien une société de collecte ou un convoyeur.
+
+La règle « obligatoire pour `personnel`, interdit ailleurs » vit dans le
+FormRequest : un lien posé par erreur sur un dépôt bancaire effacerait
+silencieusement la dette d'un serveur.
+
+### Avant ou après la fermeture : deux comptabilisations
+
+```
+pendant le service  → se retranche du théorique de CETTE session
+après la fermeture  → explique l'écart d'ouverture de la SUIVANTE
+```
+
+Le booléen **`apres_fermeture`** enregistre lequel des deux, au lieu de le
+redéduire en comparant `date_heure` à `ferme_le`. Ces colonnes sont à la
+seconde : un caissier qui verse dans la foulée de sa clôture tombait entre les
+deux cas — ni retranché d'un théorique déjà figé, ni compté dans la transition.
+Le service, lui, sait sans ambiguïté si la session était ouverte.
+
+---
+
+## La chaîne entre deux services
+
+### Règle d'or
+
+Chaque session bouclait déjà correctement, mais la **chaîne** restait ouverte :
+on fermait à 183 500, on rouvrait le lendemain à 10 000, et rien ne disait
+combien était sorti ni pour aller où. Les deux sessions se rapprochaient
+parfaitement même si 3 500 disparaissaient en route.
+
+```
+ecart_ouverture = fonds_initial − ( compté à la fermeture précédente
+                                    − versements faits depuis )
+```
+
+**Zéro** quand la transition est conforme : passage de main à main entre
+caissiers, ou versement qui explique exactement la différence. **Null** quand il
+n'y a rien à comparer — première session de la caisse, ou précédente fermée sans
+que le tiroir ait été compté.
+
+Figé à l'ouverture, comme les autres montants de rapprochement : un versement
+enregistré plus tard ne doit pas réécrire l'histoire d'une session déjà ouverte.
+
+> **On n'impose rien.** Le fonds initial n'est ni contraint ni contrôlé à la
+> saisie, et une divergence n'empêche pas d'ouvrir : elle se **signale**, à
+> charge pour un superviseur de la lire. Un service ne s'arrête pas parce que le
+> tiroir ne tombe pas juste — même principe que « une vente n'est jamais
+> bloquée ».
+
+---
+
+## Trois documents pour le client, deux gabarits
+
+| Document | Quand | Ce qu'il dit |
+|---|---|---|
+| **Addition** | Avant paiement, sur demande du client | Ce qu'il **doit**. Pas de remerciement, pas de monnaie |
+| **Reçu** | Après paiement | Ce qu'il a **payé**, ce qu'il a tendu, la monnaie rendue, dont pourboire |
+| **Facture** | Sur demande | Document A4, mention non fiscale |
+
+Addition et reçu sont **un seul gabarit à deux états** (ticket 80mm) : c'est le
+même papier, la même imprimante, le même geste au comptoir. Le modèle
+d'encaissement est **« tout au comptoir »** — le client se déplace pour payer,
+il n'y a pas de terminal itinérant en salle.
+
+> Le reçu **mentirait** sans traitement du pourboire : `monnaie = tendu − dû`
+> annoncerait au client une monnaie qu'il ne recevra pas. Le calcul retranche le
+> pourboire et l'affiche sur sa propre ligne.
+
+### Le rapport Z (fermeture)
+
+Même format 80mm, imprimé au poste et classé dans le tiroir. Il porte : les
+bornes de session et son signataire, les notes encaissées et le CA, le
+**rapprochement contenant par contenant**, les **versements**, la **transition à
+l'ouverture**, les **pourboires par serveur** (la liste qu'on lit pour les
+reverser), et les gestes sensibles du service. En tête, s'il y a lieu, le
+**motif de forçage**.
+
+Le journal d'impression (`impressions`) est **polymorphe** : il trace aussi bien
+un document de commande qu'un rapport de session. Sans quoi le ticket Z serait
+le seul document d'argent sans trace.
+
+---
+
+## Le service se fait par tours
+
+### Règle d'or
+
+Le cycle de vie appartient à la **ligne**, pas à la note. `envoyee_le` horodate
+le départ en cuisine et sert d'**identifiant de tour** — les lignes parties
+ensemble partagent la même valeur, ce qui permet à la cuisine de distinguer un
+ticket neuf de ce qui est déjà en production.
+
+> **Pourquoi ?** Une note ne servait qu'un seul tour : tout ajout était refusé
+> dès l'envoi en cuisine, donc le dessert commandé après les plats n'avait nulle
+> part où aller. Or un repas se commande en plusieurs fois.
+
+### `servie_le` est ce qui rend le multi-tour sûr
+
+`servir()` déstockait **toutes** les lignes actives de la note. Servir un second
+tour aurait redéstocké le premier, et la dérive ne serait apparue qu'à
+l'inventaire. Une ligne déjà horodatée n'est plus déstockée.
+
+Le KDS interroge donc les **lignes**, plus les commandes.
+
+---
+
+## Ce qu'un document imprimé fige
+
+### Règle d'or
+
+Un document imprimé doit rester **identique à lui-même** quel que soit l'état
+ultérieur du plan de salle ou du personnel.
+
+- **`commandes_client.table_numero`** : le numéro au moment de la commande. Les
+  gabarits lisaient `$commande->table->numero`, donc la valeur du jour :
+  renommer une table réécrivait toutes ses factures passées. Une note de mars
+  réimprimée en septembre ne correspondait plus au ticket remis au client.
+- **`commandes_client.encaisse_par`** et **`sessions_caisse.ferme_par`** : le
+  geste d'argent porte son signataire. `user_id` ne désigne que celui qui a
+  ouvert — l'ouvreur n'a pas à être le fermeur.
+
+### Archiver une table, ne pas la supprimer
+
+La suppression dure reste réservée aux tables qui n'ont **jamais servi** : dès
+qu'une commande existe, la table est indéracinable. `archivee_le` retire une
+table du service de façon réversible — sans quoi une salle réaménagée traîne à
+vie ses anciennes tables dans le plan, dans le sélecteur de la caisse et sur la
+planche QR, dont les autocollants continuent de servir un menu.
+
+> **Colonne dédiée plutôt que `SoftDeletes`** : le scope global exclurait la
+> table de `CommandeClient::table()`, et archiver casserait la réimpression de
+> tout son historique.
+> **Plutôt que `statut`** : ce dernier est piloté automatiquement par le flux de
+> commande (libre / occupée / à débarrasser), il écraserait l'archivage au
+> premier effet de bord.
+
+---
+
+## Journal d'activité : on relit, on ne réécrit pas
+
+`JournalService` **n'écrit rien**. Les traces existent déjà, chacune dans la
+table du module qui la produit, avec son contexte métier propre : `annulations`
+porte un motif et le sort du stock, `remises` un motif et une valeur,
+`paiements` un mode, `versements` une destination, `impressions` un type.
+
+> **Pourquoi pas une table d'événements générique ?** Elle perdrait ce contexte
+> et créerait **deux vérités** à maintenir — celle du module et sa copie.
+
+**Contrepartie assumée** : l'assemblage se fait en PHP, pas en SQL. La fenêtre
+de lecture doit donc rester bornée — le contrôleur impose une plage de dates
+(par défaut la journée) et un plafond par source.
+
+Lecture seule, sous **`journal.view`** : rien à créer ni à modifier, donc pas de
+`crud()` dans le catalogue de permissions.
+
+---
+
 ## Machines à états — mémo transversal
 
 > Récapitulatif des cycles de vie. Le détail (garde-fous, permissions) est dans
@@ -761,12 +1112,12 @@ libère la table.
 |---|---|---|---|
 | **Commande fournisseur** | `brouillon → envoyee → partiellement_recue → cloturee` (`annulee` sauf depuis `cloturee`) | modifiable **uniquement** en `brouillon` | jamais |
 | **Réception** | confirmée en une fois ; pilote le passage `partiellement_recue` / `cloturee` de la commande | — | **entrée** (+ dépense) |
-| **Commande client** | `ouverte → envoyee_en_cuisine → servie → encaissee` (`annulee` avant service) | immuable après `encaissee` | **sortie** au passage `servie` |
-| **Session de caisse** | `ouverte → fermee` | une seule `ouverte` par caisse | — |
+| **Commande client** | `ouverte → envoyee_en_cuisine → servie → encaissee` (`annulee` avant service) — le cycle est porté par la **ligne**, une note se sert en plusieurs tours | immuable après `encaissee` | **sortie** au passage `servie` de **chaque ligne** |
+| **Session de caisse** | `ouverte → fermee` | une seule `ouverte` par caisse ; fermeture refusée tant qu'un contenant n'est pas compté ou qu'une note servie reste impayée | — |
 | **Carte** | `brouillon → active → archivee` | une seule `active` par PDV ; sur une carte `active` on **désactive** une ligne, on ne la supprime pas | — |
 | **Fiche technique** | `active → archivee` (versioning : jamais modifiée en place, v+1) | une archive est immuable | — |
 | **Inventaire** | `en_cours → cloture` | figé à la clôture | **correction** à la clôture |
-| **Table de salle** | `libre / occupee / reservee / a_debarrasser` | — | — |
+| **Table de salle** | `libre / occupee / reservee / a_debarrasser`, plus un retrait du service réversible (`archivee_le`, hors statut) | — | — |
 
 Les **types de mouvement de stock** (`mouvements_stock.type`) tracent l'origine de
 chaque écriture : `entree_reception`, `sortie_vente`, `correction_inventaire`, et
