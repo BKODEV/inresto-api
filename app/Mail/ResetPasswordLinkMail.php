@@ -27,7 +27,7 @@ class ResetPasswordLinkMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Réinitialisation de votre mot de passe InResto',
+            subject: 'Réinitialisation de votre mot de passe',
         );
     }
 

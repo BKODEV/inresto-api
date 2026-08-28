@@ -39,4 +39,16 @@ class SessionCaissePolicy
     {
         return $user->can('session_caisse.update');
     }
+
+    /**
+     * Fermer sans que tout soit compté.
+     *
+     * Distincte de `update` à dessein : savoir fermer une caisse ne doit pas
+     * suffire à passer outre le contrôle. C'est la porte de sortie d'un
+     * responsable, pas un raccourci de fin de service.
+     */
+    public function forcer(User $user, SessionCaisse $_session): bool
+    {
+        return $user->can('session_caisse.forcer_fermeture');
+    }
 }

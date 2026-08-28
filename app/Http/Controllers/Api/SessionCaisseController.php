@@ -18,7 +18,15 @@ use Illuminate\Http\Request;
 class SessionCaisseController extends Controller
 {
     /** Relations chargées pour une session complète (caisse → PDV → site). */
-    private const RELATIONS = ['caisse.pointDeVente.site', 'user'];
+    /**
+     * La fiche d'établissement remonte jusqu'ici pour la tolérance d'écart :
+     * {@see SessionCaisseResource} la lit sans déclencher de requête.
+     */
+    private const RELATIONS = [
+        'caisse.pointDeVente.site.parametreEtablissement',
+        'user',
+        'rapprochements.modePaiement',
+    ];
 
     public function __construct(private readonly SessionCaisseService $service) {}
 
@@ -72,7 +80,7 @@ class SessionCaisseController extends Controller
      */
     public function fermer(FermerSessionCaisseRequest $request, SessionCaisse $session): JsonResponse
     {
-        $session = $this->service->fermer($session, $request->validated());
+        $session = $this->service->fermer($session, $request->validated(), $request->user()->id);
 
         return ApiResponse::updated(
             new SessionCaisseResource($session),

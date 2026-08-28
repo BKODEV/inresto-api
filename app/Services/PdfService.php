@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Enums\TypeImpression;
 use App\Models\CatalogueFournisseur;
 use App\Models\CommandeClient;
 use App\Models\CommandeFournisseur;
 use App\Models\FicheTechnique;
 use App\Models\ParametreEtablissement;
 use App\Models\PointDeVente;
+use App\Models\SessionCaisse;
 use App\Models\Site;
 use App\Models\TableSalle;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -92,10 +94,17 @@ class PdfService
     }
 
     /**
-     * Reçu de paiement (ticket 80mm).
+     * Ticket client 80mm, dans l'un de ses deux états.
+     *
+     * Addition et reçu partagent le gabarit parce qu'ils partagent le contenu :
+     * ce qui les sépare est ce qu'ils affirment. L'addition demande le paiement
+     * et n'affiche donc aucune ligne de paiement ; le reçu le prouve, et lui
+     * seul porte la monnaie rendue.
      */
-    public function htmlRecuClient(CommandeClient $commande): string
-    {
+    public function htmlTicketClient(
+        CommandeClient $commande,
+        TypeImpression $type = TypeImpression::Recu,
+    ): string {
         $commande->loadMissing([
             'table.pointDeVente.site',
             'user',
@@ -109,16 +118,56 @@ class PdfService
         return View::make('pdf.recu-client', [
             'commande' => $commande,
             'parametre' => $parametre,
+            'type' => $type,
         ])->render();
     }
 
-    public function recuClient(CommandeClient $commande): Response
+    public function ticketClient(
+        CommandeClient $commande,
+        TypeImpression $type = TypeImpression::Recu,
+    ): Response {
+        return $this->streamTicket80(
+            $this->htmlTicketClient($commande, $type),
+            "{$type->value}-{$commande->id}.pdf"
+        );
+    }
+
+    /**
+     * Rapport de fermeture de caisse — le « ticket Z », qui sort de la même
+     * imprimante que les reçus et se classe dans le tiroir.
+     *
+     * Le layout A4 commun n'est pas réutilisable ici : c'est, avec le ticket
+     * client, l'un des deux seuls documents autonomes du projet.
+     */
+    public function htmlRapportFermeture(SessionCaisse $session): string
     {
-        // Largeur ticket 80mm = 226.77pt ; hauteur volontairement large, dompdf
-        // tronque au contenu. La taille est aussi déclarée en CSS (@page).
-        return Pdf::loadHTML($this->htmlRecuClient($commande))
+        $session->loadMissing(['caisse.pointDeVente.site.parametreEtablissement', 'user', 'fermePar']);
+
+        $site = $session->caisse?->pointDeVente?->site;
+
+        return View::make('pdf.rapport-fermeture', [
+            'rapport' => app(RapportFermetureService::class)->pour($session),
+            'parametre' => $this->parametresPourSite($site),
+        ])->render();
+    }
+
+    public function rapportFermeture(SessionCaisse $session): Response
+    {
+        return $this->streamTicket80(
+            $this->htmlRapportFermeture($session),
+            "rapport-fermeture-{$session->id}.pdf"
+        );
+    }
+
+    /**
+     * Ticket 80mm = 226.77pt de large ; hauteur volontairement généreuse,
+     * dompdf tronque au contenu. La taille est aussi déclarée en CSS (@page).
+     */
+    private function streamTicket80(string $html, string $nomFichier): Response
+    {
+        return Pdf::loadHTML($html)
             ->setPaper([0, 0, 226.77, 800])
-            ->stream("recu-{$commande->id}.pdf");
+            ->stream($nomFichier);
     }
 
     /**
@@ -196,9 +245,12 @@ class PdfService
 
         // Une table sans jeton n'a pas de QR imprimable : on l'omet plutôt que
         // de produire une case vide (`inresto:backfill-table-tokens` corrige).
+        // Une table archivée n'est plus en salle : imprimer son QR remettrait en
+        // circulation un autocollant qui ne sert plus aucun menu.
         $tables = TableSalle::query()
             ->where('point_de_vente_id', $pointDeVente->id)
             ->whereNotNull('public_token')
+            ->whereNull('archivee_le')
             ->orderBy('numero')
             ->get();
 

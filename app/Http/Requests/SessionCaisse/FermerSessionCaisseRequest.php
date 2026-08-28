@@ -6,6 +6,7 @@ namespace App\Http\Requests\SessionCaisse;
 
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class FermerSessionCaisseRequest extends FormRequest
 {
@@ -20,9 +21,45 @@ class FermerSessionCaisseRequest extends FormRequest
     public function rules(): array
     {
         return [
-            // Obligatoire à la fermeture ; 0 est une valeur valide (caisse vide).
-            'montant_reel' => ['required', 'numeric', 'min:0'],
+            // Un constaté par contenant. Rien n'est obligatoire : tous les
+            // modes ne sont pas vérifiables le soir même — un virement arrive à
+            // la banque quand il arrive. Un mode laissé de côté ressort « non
+            // rapproché » sur le rapport, au lieu d'un écart inventé.
+            'rapprochements' => ['sometimes', 'array'],
+            'rapprochements.*.mode_de_paiement_id' => [
+                'required',
+                'integer',
+                Rule::exists('modes_de_paiement', 'id'),
+            ],
+            'rapprochements.*.montant_constate' => ['nullable', 'numeric', 'min:0'],
+            // Passer outre le compte d'un contenant. Réservé à qui en a la
+            // permission : savoir fermer une caisse ne doit pas suffire à
+            // contourner le contrôle.
+            'forcer' => [
+                'sometimes',
+                'boolean',
+                Rule::prohibitedIf(fn (): bool => $this->user()->cannot('forcer', $this->route('session'))),
+            ],
+            // Un forçage sans explication ne vaut pas mieux qu'un trou : la
+            // trace n'a d'intérêt que si elle dit pourquoi.
+            'motif_forcage' => [
+                Rule::requiredIf(fn (): bool => $this->boolean('forcer')),
+                'nullable',
+                'string',
+                'max:500',
+            ],
             'notes' => ['nullable', 'string'],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'forcer.prohibited' => 'Vous n\'êtes pas autorisé à fermer une caisse sans tout compter.',
+            'motif_forcage.required' => 'Expliquez pourquoi la fermeture est forcée.',
         ];
     }
 }

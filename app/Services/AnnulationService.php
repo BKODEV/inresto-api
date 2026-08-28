@@ -34,20 +34,38 @@ class AnnulationService
     ) {}
 
     /**
-     * Annule une ligne (soft). Si la commande est servie, `sort` pilote le
+     * Retire une ligne.
+     *
+     * Deux gestes distincts derrière un seul point d'entrée : suppression sèche
+     * tant que la ligne n'est pas partie en cuisine (retourne `null`), sinon
+     * annulation tracée avec motif. Si la LIGNE était servie, `sort` pilote le
      * devenir du stock déjà déchargé.
      *
-     * @param  array{motif: string, sort?: string|null}  $data
+     * @param  array{motif?: string|null, sort?: string|null}  $data
      *
      * @throws AnnulationException
      */
-    public function annulerLigne(CommandeClient $commande, LigneCommandeClient $ligne, array $data, string $userId): Annulation
+    public function annulerLigne(CommandeClient $commande, LigneCommandeClient $ligne, array $data, string $userId): ?Annulation
     {
         if ($commande->estEncaissee() || $commande->statut === StatutCommandeClient::Annulee) {
             throw AnnulationException::ligneNonAnnulable($commande->id);
         }
 
-        $etaitServie = $commande->estServie();
+        // Ligne encore au brouillon : la cuisine ne l'a jamais vue, rien n'a été
+        // produit ni déstocké. Ce n'est pas une annulation, c'est une correction
+        // de saisie — elle disparaît sans laisser de trace. Écrire une
+        // `annulation` ici noierait celles qui comptent vraiment sous le bruit
+        // des « le client a changé d'avis ».
+        if ($ligne->estRetirableSansMotif()) {
+            $this->retirerDuBrouillon($commande, $ligne);
+
+            return null;
+        }
+
+        // Le déstockage se fait ligne à ligne : c'est l'état de la LIGNE qui dit
+        // si du stock est à recréditer, pas celui de la note. Une note « servie »
+        // peut porter un tour tout juste envoyé, pas encore déstocké.
+        $etaitServie = $ligne->estServie();
         $sort = $etaitServie ? ($data['sort'] ?? null) : null;
 
         return DB::transaction(function () use ($commande, $ligne, $data, $userId, $etaitServie, $sort): Annulation {
@@ -187,6 +205,19 @@ class AnnulationService
                 'raison' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Supprime une ligne jamais partie en cuisine. Suppression réelle et non
+     * passage en `inactif` : une ligne de brouillon retirée n'a aucune histoire
+     * à conserver.
+     */
+    private function retirerDuBrouillon(CommandeClient $commande, LigneCommandeClient $ligne): void
+    {
+        DB::transaction(function () use ($commande, $ligne): void {
+            $ligne->delete();
+            $this->recalculerMontantTotal($commande);
+        });
     }
 
     private function recalculerMontantTotal(CommandeClient $commande): void

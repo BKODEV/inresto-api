@@ -69,8 +69,10 @@ class RoleSeeder extends Seeder
                     ...$this->crud('carte_produit'),
                     ...$this->crud('table'),
                     ...$this->crud('session_caisse'), 'session_caisse.utiliser',
+                    'session_caisse.forcer_fermeture',
                     ...$this->crud('commande_client'), 'commande_client.encaisser',
                     'paiement.view', 'paiement.create',
+                    'versement.view', 'versement.create',
                     'remise.view', 'remise.create', 'remise.autoriser_au_dela_seuil',
                     'annulation.view', 'annulation.create',
                     'fournisseur.view', 'commande-fournisseur.view', 'reception.view',
@@ -78,6 +80,9 @@ class RoleSeeder extends Seeder
                     'fichetechnique.view', 'sousrecette.view',
                     'reporting.food_cost', 'reporting.ventes', 'reporting.stock',
                     'reporting.budget', 'reporting.dashboard', 'reporting.global',
+                    // Journal d'activité : c'est le gérant qui contrôle les
+                    // annulations, remises et réimpressions de son personnel.
+                    'journal.view',
                 ],
             ],
             'chef-cuisine' => [
@@ -93,6 +98,10 @@ class RoleSeeder extends Seeder
                     'unite-de-mesure.view',
                     'produit.view',
                     'fournisseur.view', 'catalogue-fournisseur.view', 'commande-fournisseur.view',
+                    // Écran de production (KDS) : la cuisine doit voir les
+                    // commandes envoyées et les marquer servies. Sans ces deux
+                    // permissions, son propre écran lui est inaccessible.
+                    'commande_client.view', 'commande_client.update',
                     'reporting.food_cost', 'reporting.stock',
                 ],
             ],
@@ -119,6 +128,7 @@ class RoleSeeder extends Seeder
                     'session_caisse.view', 'session_caisse.create', 'session_caisse.utiliser',
                     'commande_client.view', 'commande_client.create', 'commande_client.encaisser',
                     'paiement.view', 'paiement.create',
+                    'versement.view', 'versement.create',
                     'remise.view', 'remise.create',
                     'annulation.view', 'annulation.create',
                     'table.view', 'carte.view', 'produit.view', 'carte_produit.view',

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\StatutCommandeClient;
 use App\Enums\StatutTable;
 use Database\Factories\TableSalleFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -29,6 +30,7 @@ class TableSalle extends Model
         'capacite',
         'statut',
         'public_token',
+        'archivee_le',
     ];
 
     protected $attributes = [
@@ -38,6 +40,7 @@ class TableSalle extends Model
     protected $casts = [
         'capacite' => 'integer',
         'statut' => StatutTable::class,
+        'archivee_le' => 'datetime',
     ];
 
     public function pointDeVente(): BelongsTo
@@ -58,6 +61,25 @@ class TableSalle extends Model
     public function aDesCommandes(): bool
     {
         return $this->commandes()->exists();
+    }
+
+    /**
+     * Pendant restreint de {@see aDesCommandes()} : seules les commandes encore
+     * vivantes comptent. C'est le garde-fou de l'archivage — retirer du plan de
+     * salle une table sur laquelle un serveur travaille encore la ferait
+     * disparaître en plein service.
+     */
+    public function aUneCommandeEnCours(): bool
+    {
+        return $this->commandes()
+            ->whereIn('statut', StatutCommandeClient::valeursEnCours())
+            ->exists();
+    }
+
+    /** Table retirée du service : hors plan de salle, hors caisse, QR éteint. */
+    public function estArchivee(): bool
+    {
+        return $this->archivee_le !== null;
     }
 
     /**

@@ -24,7 +24,14 @@ class StoreModeDePaiementRequest extends FormRequest
     {
         return [
             'libelle' => ['required', 'string', 'max:255'],
-            'statut'  => ['sometimes', Rule::enum(Statut::class)],
+            // L'argent de ce mode se retrouve-t-il dans le tiroir compté à la
+            // fermeture ? Seuls les modes marqués entrent dans le théorique de
+            // la session.
+            'compte_en_caisse' => ['sometimes', 'boolean'],
+            // Ordre des boutons à la caisse, et départage entre plusieurs modes
+            // en tiroir pour la présélection. Absent ou <= 0 = placé en fin.
+            'ordre' => ['sometimes', 'integer', 'min:0'],
+            'statut' => ['sometimes', Rule::enum(Statut::class)],
         ];
     }
 }

@@ -15,6 +15,7 @@ use App\Exceptions\SessionCaisseException;
 use App\Exceptions\SousRecetteException;
 use App\Exceptions\TableSalleException;
 use App\Exceptions\UserException;
+use App\Exceptions\VersementException;
 use App\Helpers\ApiResponse;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
@@ -65,6 +66,10 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         $exceptions->render(function (TableSalleException $e) {
+            return ApiResponse::custom($e->status, 'error', $e->getMessage());
+        });
+
+        $exceptions->render(function (VersementException $e) {
             return ApiResponse::custom($e->status, 'error', $e->getMessage());
         });
 

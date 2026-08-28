@@ -28,7 +28,7 @@ class WelcomeUserMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Votre accès InResto',
+            subject: 'Votre accès à la console de gestion',
         );
     }
 

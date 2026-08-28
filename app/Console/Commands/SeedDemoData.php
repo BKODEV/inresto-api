@@ -136,8 +136,19 @@ class SeedDemoData extends Command
         collect(['Fruits & Légumes', 'Viandes & Volailles', 'Produits de la mer', 'Épicerie', 'Crèmerie'])
             ->each(fn (string $libelle) => CategorieMatierePremiere::factory()->create(['libelle' => $libelle]));
 
-        collect(['Espèces', 'Carte bancaire', 'Mobile Money', 'Virement'])
-            ->each(fn (string $libelle) => ModeDePaiement::factory()->create(['libelle' => $libelle]));
+        // Seules les espèces atterrissent dans le tiroir qu'on compte à la
+        // fermeture : les trois autres seraient comptées deux fois si elles
+        // entraient dans le théorique de la session.
+        collect([
+            ['Espèces', true],
+            ['Carte bancaire', false],
+            ['Mobile Money', false],
+            ['Virement', false],
+        ])->each(fn (array $mode, int $index) => ModeDePaiement::factory()->create([
+            'libelle' => $mode[0],
+            'compte_en_caisse' => $mode[1],
+            'ordre' => $index + 1,
+        ]));
     }
 
     /**

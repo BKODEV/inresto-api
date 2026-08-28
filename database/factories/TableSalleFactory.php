@@ -31,6 +31,12 @@ class TableSalleFactory extends Factory
         return $this->state(['statut' => StatutTable::Occupee->value]);
     }
 
+    /** Table retirée du service : hors plan de salle, hors caisse, QR éteint. */
+    public function archivee(): static
+    {
+        return $this->state(['archivee_le' => now()]);
+    }
+
     /**
      * Table antérieure à l'introduction des QR : sert à exercer le backfill.
      */

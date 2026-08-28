@@ -23,6 +23,11 @@ class LigneCommandeClientResource extends JsonResource
             'prix_unitaire' => $this->prix_unitaire,
             'commentaire' => $this->commentaire,
             'statut' => $this->statut->value,
+            // Horodatage du tour : les lignes parties ensemble le partagent.
+            'envoyee_le' => $this->envoyee_le?->toIso8601String(),
+            'servie_le' => $this->servie_le?->toIso8601String(),
+            // Jamais partie en cuisine : se retire sans motif d'annulation.
+            'retirable_sans_motif' => $this->estRetirableSansMotif(),
             'produit' => new ProduitResource($this->whenLoaded('produit')),
         ];
     }

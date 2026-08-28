@@ -162,3 +162,210 @@ it('refuse la création sans la permission', function () {
         'capacite' => 2,
     ])->assertForbidden();
 });
+
+// ───────────────────────── archivage ─────────────────────────
+
+it('archive une table sans commande en cours', function () {
+    actingAsTableUser(['table.delete']);
+    $table = TableSalle::factory()->create();
+
+    postJson("/api/tables/{$table->id}/archiver")->assertOk();
+
+    expect($table->fresh()->archivee_le)->not->toBeNull();
+});
+
+/**
+ * Tout l'intérêt de l'archivage face à la suppression : une table qui a servi
+ * ne peut plus être supprimée, mais doit pouvoir quitter la salle.
+ */
+it('archive une table porteuse de commandes terminées', function (StatutCommandeClient $statut) {
+    actingAsTableUser(['table.delete']);
+    $table = TableSalle::factory()->create();
+    CommandeClient::factory()->create(['table_id' => $table->id, 'statut' => $statut->value]);
+
+    deleteJson("/api/tables/{$table->id}")->assertStatus(409);
+    postJson("/api/tables/{$table->id}/archiver")->assertOk();
+
+    expect($table->fresh()->archivee_le)->not->toBeNull();
+})->with([
+    'commande encaissée' => [StatutCommandeClient::Encaissee],
+    'commande annulée' => [StatutCommandeClient::Annulee],
+]);
+
+it('refuse d\'archiver une table portant une commande en cours (409)', function (StatutCommandeClient $statut) {
+    actingAsTableUser(['table.delete']);
+    $table = TableSalle::factory()->create();
+    CommandeClient::factory()->create(['table_id' => $table->id, 'statut' => $statut->value]);
+
+    postJson("/api/tables/{$table->id}/archiver")->assertStatus(409);
+
+    expect($table->fresh()->archivee_le)->toBeNull();
+})->with([
+    'ouverte' => [StatutCommandeClient::Ouverte],
+    'envoyée en cuisine' => [StatutCommandeClient::EnvoyeeEnCuisine],
+    'servie mais pas encore encaissée' => [StatutCommandeClient::Servie],
+]);
+
+it('refuse d\'archiver deux fois (409)', function () {
+    actingAsTableUser(['table.delete']);
+    $table = TableSalle::factory()->archivee()->create();
+
+    postJson("/api/tables/{$table->id}/archiver")->assertStatus(409);
+});
+
+it('réactive une table archivée en conservant son jeton public', function () {
+    actingAsTableUser(['table.delete']);
+    $table = TableSalle::factory()->archivee()->create();
+    $jeton = $table->public_token;
+
+    postJson("/api/tables/{$table->id}/reactiver")->assertOk();
+
+    expect($table->fresh()->archivee_le)->toBeNull()
+        ->and($table->fresh()->public_token)->toBe($jeton);
+});
+
+it('refuse de réactiver une table qui ne l\'est pas (409)', function () {
+    actingAsTableUser(['table.delete']);
+    $table = TableSalle::factory()->create();
+
+    postJson("/api/tables/{$table->id}/reactiver")->assertStatus(409);
+});
+
+it('masque les tables archivées de l\'index, sauf sur ?archivees=1', function () {
+    actingAsTableUser(['table.view']);
+    $pdv = PointDeVente::factory()->create();
+    TableSalle::factory()->count(2)->create(['point_de_vente_id' => $pdv->id]);
+    TableSalle::factory()->archivee()->create(['point_de_vente_id' => $pdv->id]);
+
+    getJson("/api/tables?point_de_vente_id={$pdv->id}")
+        ->assertOk()
+        ->assertJsonCount(2, 'data.tables');
+
+    getJson("/api/tables?point_de_vente_id={$pdv->id}&archivees=1")
+        ->assertOk()
+        ->assertJsonCount(3, 'data.tables');
+});
+
+it('refuse l\'archivage sans la permission table.delete', function () {
+    actingAsTableUser(['table.update']);
+    $table = TableSalle::factory()->create();
+
+    postJson("/api/tables/{$table->id}/archiver")->assertForbidden();
+    postJson("/api/tables/{$table->id}/reactiver")->assertForbidden();
+});
+
+// ───────────────────────── création en lot ─────────────────────────
+
+it('crée une série de tables en un appel', function () {
+    actingAsTableUser(['table.create']);
+    $pdv = PointDeVente::factory()->create();
+
+    postJson('/api/tables/lot', [
+        'point_de_vente_id' => $pdv->id,
+        'lignes' => [
+            ['numero' => 'T01', 'capacite' => 2],
+            ['numero' => 'T02', 'capacite' => 4],
+            ['numero' => 'T03', 'capacite' => 4],
+        ],
+    ])->assertCreated()->assertJsonCount(3, 'data');
+
+    expect(TableSalle::where('point_de_vente_id', $pdv->id)->count())->toBe(3);
+});
+
+/**
+ * Le jeton est ce qui rend la planche QR imprimable dans la foulée du lot :
+ * sans lui, créer trente tables obligerait à passer par le backfill.
+ */
+it('dote chaque table du lot de son jeton public', function () {
+    actingAsTableUser(['table.create']);
+    $pdv = PointDeVente::factory()->create();
+
+    postJson('/api/tables/lot', [
+        'point_de_vente_id' => $pdv->id,
+        'lignes' => [['numero' => 'T01', 'capacite' => 2], ['numero' => 'T02', 'capacite' => 2]],
+    ])->assertCreated();
+
+    $tokens = TableSalle::where('point_de_vente_id', $pdv->id)->pluck('public_token');
+
+    expect($tokens->filter())->toHaveCount(2)
+        ->and($tokens->unique())->toHaveCount(2);
+});
+
+it('refuse le lot entier si un numéro est déjà pris (422)', function () {
+    actingAsTableUser(['table.create']);
+    $pdv = PointDeVente::factory()->create();
+    TableSalle::factory()->create(['point_de_vente_id' => $pdv->id, 'numero' => 'T02']);
+
+    postJson('/api/tables/lot', [
+        'point_de_vente_id' => $pdv->id,
+        'lignes' => [
+            ['numero' => 'T01', 'capacite' => 2],
+            ['numero' => 'T02', 'capacite' => 2],
+            ['numero' => 'T03', 'capacite' => 2],
+        ],
+    ])->assertUnprocessable()->assertJsonValidationErrors('lignes.1.numero');
+
+    // Tout ou rien : ni T01 ni T03 ne doivent exister.
+    expect(TableSalle::where('point_de_vente_id', $pdv->id)->count())->toBe(1);
+});
+
+/**
+ * `unique` interroge l'état d'avant la requête : sans `distinct`, deux lignes
+ * identiques passeraient la validation et violeraient l'index à l'insertion.
+ */
+it('refuse un doublon interne au lot, casse comprise (422)', function () {
+    actingAsTableUser(['table.create']);
+    $pdv = PointDeVente::factory()->create();
+
+    postJson('/api/tables/lot', [
+        'point_de_vente_id' => $pdv->id,
+        'lignes' => [
+            ['numero' => 'T01', 'capacite' => 2],
+            ['numero' => 't01', 'capacite' => 4],
+        ],
+    ])->assertUnprocessable();
+
+    expect(TableSalle::where('point_de_vente_id', $pdv->id)->count())->toBe(0);
+});
+
+it('refuse un numéro déjà porté par une table archivée (422)', function () {
+    actingAsTableUser(['table.create']);
+    $pdv = PointDeVente::factory()->create();
+    TableSalle::factory()->archivee()->create(['point_de_vente_id' => $pdv->id, 'numero' => 'T01']);
+
+    postJson('/api/tables/lot', [
+        'point_de_vente_id' => $pdv->id,
+        'lignes' => [['numero' => 'T01', 'capacite' => 2]],
+    ])->assertUnprocessable()->assertJsonValidationErrors('lignes.0.numero');
+});
+
+it('plafonne la taille d\'un lot à 100 tables (422)', function () {
+    actingAsTableUser(['table.create']);
+    $pdv = PointDeVente::factory()->create();
+
+    $lignes = collect(range(1, 101))
+        ->map(fn (int $i) => ['numero' => 'T'.$i, 'capacite' => 2])
+        ->all();
+
+    postJson('/api/tables/lot', ['point_de_vente_id' => $pdv->id, 'lignes' => $lignes])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('lignes');
+});
+
+it('refuse un lot vide (422)', function () {
+    actingAsTableUser(['table.create']);
+
+    postJson('/api/tables/lot', [
+        'point_de_vente_id' => PointDeVente::factory()->create()->id,
+        'lignes' => [],
+    ])->assertUnprocessable()->assertJsonValidationErrors('lignes');
+});
+
+it('refuse la création en lot sans la permission table.create', function () {
+    actingAsTableUser(['table.view']);
+
+    postJson('/api/tables/lot', [
+        'point_de_vente_id' => PointDeVente::factory()->create()->id,
+        'lignes' => [['numero' => 'T01', 'capacite' => 2]],
+    ])->assertForbidden();
+});

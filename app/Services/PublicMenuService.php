@@ -24,11 +24,17 @@ class PublicMenuService
 {
     /**
      * Retrouve une table par son jeton public, ou null si le jeton est inconnu.
+     *
+     * Une table archivée est traitée comme un jeton inconnu : elle n'est plus
+     * en salle, et son autocollant QR peut très bien traîner quelque part. Le
+     * contrôleur renvoie donc le même 404 « Menu indisponible » que pour un QR
+     * erroné, sans révéler que la table a existé.
      */
     public function tableParToken(string $token): ?TableSalle
     {
         return TableSalle::query()
             ->where('public_token', $token)
+            ->whereNull('archivee_le')
             ->with('pointDeVente.site')
             ->first();
     }

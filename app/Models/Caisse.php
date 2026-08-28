@@ -31,6 +31,12 @@ class Caisse extends Model
         return $this->belongsTo(PointDeVente::class);
     }
 
+    /** Sorties d'argent de ce tiroir : coffre, banque, direction. */
+    public function versements(): HasMany
+    {
+        return $this->hasMany(Versement::class);
+    }
+
     public function sessions(): HasMany
     {
         return $this->hasMany(SessionCaisse::class);

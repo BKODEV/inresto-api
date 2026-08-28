@@ -29,6 +29,12 @@ class AnnulationController extends Controller
 
         $annulation = $this->service->annulerLigne($commande, $ligne, $request->validated(), $request->user()->id);
 
+        // `null` = la ligne était encore au brouillon : retirée sans trace, il
+        // n'y a pas d'annulation à renvoyer.
+        if ($annulation === null) {
+            return ApiResponse::deleted('Ligne retirée.');
+        }
+
         return ApiResponse::success(
             new AnnulationResource($annulation),
             'Ligne annulée.'

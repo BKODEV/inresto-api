@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\DepenseController;
 use App\Http\Controllers\Api\FicheTechniqueController;
 use App\Http\Controllers\Api\FournisseurController;
 use App\Http\Controllers\Api\InventaireController;
+use App\Http\Controllers\Api\JournalController;
 use App\Http\Controllers\Api\LigneCommandeFournisseurController;
 use App\Http\Controllers\Api\MatierePremiereController;
 use App\Http\Controllers\Api\MouvementStockController;
@@ -26,6 +27,7 @@ use App\Http\Controllers\Api\PasswordResetController;
 use App\Http\Controllers\Api\PdfController;
 use App\Http\Controllers\Api\PermissionController;
 use App\Http\Controllers\Api\PointDeVenteController;
+use App\Http\Controllers\Api\PourboireController;
 use App\Http\Controllers\Api\ProduitController;
 use App\Http\Controllers\Api\PublicMenuController;
 use App\Http\Controllers\Api\ReceptionController;
@@ -42,6 +44,7 @@ use App\Http\Controllers\Api\SousRecetteController;
 use App\Http\Controllers\Api\StockController;
 use App\Http\Controllers\Api\TableSalleController;
 use App\Http\Controllers\Api\UserController;
+use App\Http\Controllers\Api\VersementController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function () {
@@ -165,11 +168,23 @@ Route::middleware('auth:sanctum')->group(function () {
         ->only(['index', 'store', 'update', 'destroy'])
         ->parameters(['cartes' => 'carte', 'produits' => 'carte_produit']);
 
+    // Journal d'activité — lecture seule, agrège les traces des autres modules.
+    Route::get('journal', [JournalController::class, 'index'])->name('journal.index');
+
     // Module Salle — Tables de salle (CRUD par PDV + changement de statut manuel).
+    // Déclarée AVANT l'apiResource, sinon `tables/{table}` capture « lot ».
+    Route::post('tables/lot', [TableSalleController::class, 'storeLot'])
+        ->name('tables.lot');
     Route::apiResource('tables', TableSalleController::class)
         ->parameters(['tables' => 'table']);
     Route::patch('tables/{table}/statut', [TableSalleController::class, 'changerStatut'])
         ->name('tables.statut');
+    // Retrait/remise en service : gouverné par `table.delete`, c'est la
+    // contrepartie réversible de la suppression pour une table qui a servi.
+    Route::post('tables/{table}/archiver', [TableSalleController::class, 'archiver'])
+        ->name('tables.archiver');
+    Route::post('tables/{table}/reactiver', [TableSalleController::class, 'reactiver'])
+        ->name('tables.reactiver');
 
     // Module Salle — QR codes du menu public (côté administration).
     Route::post('tables/{table}/regenerer-token', [TableSalleController::class, 'regenererToken'])
@@ -185,6 +200,16 @@ Route::middleware('auth:sanctum')->group(function () {
         ->parameters(['sessions-caisse' => 'session']);
     Route::post('sessions-caisse/{session}/fermer', [SessionCaisseController::class, 'fermer'])
         ->name('sessions-caisse.fermer');
+    Route::get('pourboires/soldes', [PourboireController::class, 'soldes'])
+        ->name('pourboires.soldes');
+    Route::get('pourboires/mon-solde', [PourboireController::class, 'monSolde'])
+        ->name('pourboires.mon-solde');
+    Route::get('caisses/{caisse}/versements', [VersementController::class, 'index'])
+        ->name('caisses.versements.index');
+    Route::post('caisses/{caisse}/versements', [VersementController::class, 'store'])
+        ->name('caisses.versements.store');
+    Route::get('sessions-caisse/{session}/rapport-fermeture', [PdfController::class, 'rapportFermeture'])
+        ->name('sessions-caisse.rapport-fermeture');
 
     // Module Salle — Commandes client + KDS + déstockage à la vente.
     Route::apiResource('commandes-client', CommandeClientController::class)
@@ -192,6 +217,8 @@ Route::middleware('auth:sanctum')->group(function () {
         ->parameters(['commandes-client' => 'commande']);
     Route::get('commandes-client/{commande}/pdf', [PdfController::class, 'factureClient'])
         ->name('commandes-client.pdf');
+    Route::get('commandes-client/{commande}/addition', [PdfController::class, 'additionClient'])
+        ->name('commandes-client.addition');
     Route::get('commandes-client/{commande}/recu', [PdfController::class, 'recuClient'])
         ->name('commandes-client.recu');
     Route::post('commandes-client/{commande}/lignes', [CommandeClientController::class, 'ajouterLigne'])
@@ -210,6 +237,10 @@ Route::middleware('auth:sanctum')->group(function () {
         ->name('commandes-client.paiements.store');
     Route::post('commandes-client/{commande}/remises', [RemiseController::class, 'store'])
         ->name('commandes-client.remises.store');
+    // Abandon d'une commande jamais garnie : suppression sèche, sans motif.
+    // L'annulation motivée reste la seule issue dès qu'elle a porté quelque chose.
+    Route::delete('commandes-client/{commande}', [CommandeClientController::class, 'destroy'])
+        ->name('commandes-client.destroy');
     Route::post('commandes-client/{commande}/annuler', [AnnulationController::class, 'annulerCommande'])
         ->name('commandes-client.annuler');
     Route::delete('commandes-client/{commande}/lignes/{ligne}', [AnnulationController::class, 'annulerLigne'])

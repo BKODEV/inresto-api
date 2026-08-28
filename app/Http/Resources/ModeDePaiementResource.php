@@ -15,9 +15,12 @@ class ModeDePaiementResource extends JsonResource
     public function toArray(Request $request): array
     {
         return [
-            'id'         => $this->id,
-            'libelle'    => $this->libelle,
-            'statut'     => $this->statut->value,
+            'id' => $this->id,
+            'libelle' => $this->libelle,
+            /** Cet argent finit-il dans le tiroir qu'on compte à la fermeture ? */
+            'compte_en_caisse' => $this->compte_en_caisse,
+            'ordre' => $this->ordre,
+            'statut' => $this->statut->value,
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
         ];

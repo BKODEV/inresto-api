@@ -93,3 +93,36 @@ it('refuse la lecture sans la permission view', function () {
 
     getJson("/api/sites/{$site->id}/parametres")->assertForbidden();
 });
+
+/**
+ * Le montant sous lequel un écart de fermeture est réputé normal. Le laisser
+ * négatif rendrait la comparaison absurde.
+ */
+it('accepte une tolérance d\'écart de caisse et refuse une valeur négative', function () {
+    $user = actingWithParamPerms(['parametre_etablissement.update', 'parametre_etablissement.view']);
+    $site = Site::factory()->create();
+    $user->sites()->attach($site->id);
+
+    putJson("/api/sites/{$site->id}/parametres", [
+        'nom_commercial' => 'Le Baoulé',
+        'devise' => 'XOF',
+        'tolerance_ecart_caisse' => 500,
+    ])->assertOk()->assertJsonPath('data.tolerance_ecart_caisse', '500.00');
+
+    putJson("/api/sites/{$site->id}/parametres", [
+        'nom_commercial' => 'Le Baoulé',
+        'devise' => 'XOF',
+        'tolerance_ecart_caisse' => -1,
+    ])->assertStatus(422)->assertJsonValidationErrors('tolerance_ecart_caisse');
+});
+
+it('laisse la tolérance à zéro quand elle n\'est pas fournie', function () {
+    $user = actingWithParamPerms(['parametre_etablissement.update', 'parametre_etablissement.view']);
+    $site = Site::factory()->create();
+    $user->sites()->attach($site->id);
+
+    putJson("/api/sites/{$site->id}/parametres", [
+        'nom_commercial' => 'Le Baoulé',
+        'devise' => 'XOF',
+    ])->assertOk()->assertJsonPath('data.tolerance_ecart_caisse', '0.00');
+});

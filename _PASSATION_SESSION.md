@@ -4,114 +4,186 @@
 > bonne base de contexte — le **contexte projet**, l'**état global** et les
 > **points d'attention**.
 > **Ce n'est pas un journal** : l'historique des modifications vit dans git, le
-> détail de chaque module dans le code, et les décisions structurantes dans les
-> **mémoires**. On met ce fichier à *jour* (on remplace l'état), on ne l'*empile* pas.
+> détail de chaque module dans le code, les règles métier dans
+> **`NOTES-DE-GESTION.md`**, et les décisions structurantes dans les **mémoires**.
+> On met ce fichier à *jour* (on remplace l'état), on ne l'*empile* pas.
 
 ## Contexte projet
 
 - API **Laravel 13 / PHP 8.4**, auth **Sanctum** (Bearer), permissions **spatie**
   (guard `api`), BD **PostgreSQL**. Users en **UUID** → FK users = `foreignUuid`.
 - Domaine : restauration **multi-site** (stock, achats, budgets, recettes,
-  inventaires, salle/vente, reporting).
+  inventaires, salle/vente, caisse, reporting).
 - Conventions : controllers fins + **Services** (métier) + **FormRequests**
   (validation) + **API Resources** + **Policies** (`feature.action`) ; réponses
   via `App\Helpers\ApiResponse` `{status,message,data}` ; routes sous **`/api/`**
   (pas de `/v1/`) ; exceptions métier dédiées rendues en JSON par `bootstrap/app.php`.
+- **Enums fermés plutôt que texte libre** pour toute nature métier
+  (`TypeImpression`, `DestinationVersement`, `StatutTable`, `SortAnnulation`) :
+  une saisie ouverte donne « coffre », « Coffre » et « au coffre » au bout d'un
+  mois, et plus rien d'interrogeable.
 - ⚠️ **Tests** : `php artisan config:clear` avant `php artisan test` si un cache de
   config traîne (il force pgsql sinon ; la suite tourne en SQLite `:memory:`).
-  La `memory_limit` est fixée à 512M dans `phpunit.xml` — la suite dépassait les
-  128M par défaut. **Pint** : `vendor/bin/pint --dirty --format agent` avant de finaliser.
+  La `memory_limit` est fixée à 512M dans `phpunit.xml`. **Pint** :
+  `vendor/bin/pint --dirty --format agent` avant de finaliser.
 - Front séparé : **`../inresto-app`** (Angular 21, zoneless, signals). Build
-  `npm run build`, tests `npm test` (Vitest + jsdom, **pas** Jasmine).
+  `npx ng build`, tests `npx ng test --watch=false` (Vitest + jsdom, **pas** Jasmine).
 
 ## État global
 
-- **442 tests verts, Pint clean.** Arbre propre, rien en attente de commit.
-- **Dépôts distants configurés** (premier push fait, `main` suit `origin/main`) :
-  - API → `git@github.com:BKODEV/inresto-api.git`, HEAD `1c52acb`.
-  - Front → `git@github.com:BKODEV/inresto-app.git`, HEAD `8848cf9`.
+- **596 tests API verts (1745 assertions)**, **141 tests front verts**, builds
+  propres, Pint clean.
+- **Travail en cours sur la branche `feat/tables-caisse-audit`**, dans les **deux**
+  dépôts, **ni fusionnée ni poussée** :
+  - API → 10 commits d'avance sur `main`, HEAD `493fe6c`.
+  - Front → 12 commits d'avance sur `main`, HEAD `7774c02`.
+  - Distants : `git@github.com:BKODEV/inresto-api.git` · `…/inresto-app.git`.
+- Seul fichier non commité : `.env.example` (ajout de `FRONTEND_URL`, cf. plus bas).
 - Modules livrés (back testé + front câblé) :
   - **Socle & multi-site** : sites, points de vente, caisses, périmètre user par
     site — **appliqué par le serveur** (voir Décisions structurantes).
   - **Achats** : fournisseurs, catalogue, commandes fournisseur, réceptions,
-    budgets & dépenses. Un article ne figure qu'une fois par commande et par
-    réception ; `quantite_recue` / `quantite_restante` exposées.
-  - **Stock** : `StockService` (PMP), inventaires, **lecture par site
-    (`GET /api/stock`) et journal des mouvements (`GET /api/stock/mouvements`)**
-    sous permission `stock.view`.
+    budgets & dépenses.
+  - **Stock** : `StockService` (PMP), inventaires, lecture par site et journal
+    des mouvements.
   - **Recettes** : sous-recettes, fiches techniques versionnées.
-  - **Salle / vente** : produits & cartes, tables, sessions caisse, commandes
-    client + KDS + déstockage, paiements / remises / annulations / clôture.
-    Ajout **en lot** de produits sur une carte (`POST /cartes/{carte}/produits/lot`).
-  - **Produits** : photo par produit (téléversement dédié, disque `public`),
-    affichée sur le menu public.
-  - **Menu public par QR** : jeton **par table**, seul périmètre non authentifié
-    (`GET /api/public/menu/{token}`), QR par table et planche par point de vente.
-  - **Paramètres d'établissement + Logo + PDF** : 1 fiche/site, upload logo ;
-    `PdfService` + 4 documents (bon de commande, facture & reçu client, fiche
-    technique) via dompdf, stream inline jamais stocké.
-  - **Utilisateurs & Rôles** : RBAC admin complet (hiérarchie anti-escalade,
-    périmètre, reset mots de passe), commande `inresto:install`.
+  - **Salle / vente** : produits & cartes, tables (archivage réversible, création
+    en lot), commandes client **servies par tours**, KDS adossé aux **lignes**,
+    déstockage, remises / annulations.
+  - **Poste de caisse** (`caisse.layout` côté front) : plan de salle, file
+    d'encaissement, sessions, ventes du service, pourboires.
+  - **Fermeture de caisse** : rapprochement **contenant par contenant**,
+    tolérance d'écart par site, sens d'écart qualifié, **versements**,
+    **écart de transition** entre deux sessions, **fermeture forcée** sous
+    permission, rapport Z 80mm.
+  - **Pourboires** : colonne dédiée sur le paiement, soldes par serveur,
+    reversement par versement `personnel`, écran « Mes pourboires » pour le serveur.
+  - **Journal d'activité** : frise chronologique **en lecture seule**, agrège les
+    traces des autres modules (annulations, remises, paiements, versements,
+    impressions) sans jamais écrire.
+  - **Menu public par QR** : jeton **par table**, seul périmètre non authentifié.
+  - **PDF** : bon de commande, fiche technique, facture A4, **addition et reçu**
+    (un gabarit 80mm à deux états), rapport de fermeture, planches QR.
+  - **Utilisateurs & Rôles** : RBAC admin complet, commande `inresto:install`.
   - **Reporting** (lecture seule) : ventes, food cost, stock, budget, dashboard.
-- **Données de démo** : `inresto:demo` regénère un jeu complet (factories) ;
-  `inresto:demo-carte` est **additive et idempotente** — carte internationale,
-  matières et prix catalogue manquants, fiches techniques, photos, puis
-  approvisionnement du stock par commande fournisseur réceptionnée.
+- **Données de démo** : `inresto:demo` regénère un jeu complet ;
+  `inresto:demo-carte` est **additive et idempotente**.
 
 ## Décisions structurantes
 
-Elles vivent dans les **mémoires** (voir plus bas). À retenir en tête :
+Le **pourquoi** de chaque règle métier est dans **`NOTES-DE-GESTION.md`**, les
+décisions transverses dans les **mémoires**. À retenir en tête :
+
 - **Le pivot `user_site` est une frontière appliquée par le serveur**, pas un
   confort d'affichage : `App\Support\SitePerimetre` borne les lectures,
-  `App\Rules\SiteDansPerimetre` les écritures, et les policies Inventaire /
-  Reception / Budget contrôlent l'accès direct par identifiant.
-  **Deux notions de « global »** : en opérationnel, seul le super-admin dépasse
-  son périmètre ; `reporting.global` n'élargit que la lecture analytique
-  → [[perimetre-site-applique]].
-- **Au moins un site est obligatoire à la création d'un compte** (et on ne peut
-  pas vider le périmètre d'un compte existant) — sans quoi l'application du
-  périmètre produirait des comptes en 403 permanent.
+  `App\Rules\SiteDansPerimetre` les écritures. **Deux notions de « global »** :
+  en opérationnel, seul le super-admin dépasse son périmètre ; `reporting.global`
+  n'élargit que la lecture analytique → [[perimetre-site-applique]].
+- **Au moins un site est obligatoire à la création d'un compte**, sans quoi
+  l'application du périmètre produirait des comptes en 403 permanent.
 - **Super-admin = périmètre « tous les sites »** (bypass, pas de rattachement
   `user_site`) → [[module-utilisateurs-roles]].
-- **PDF orientés revente** : zéro donnée d'établissement en dur (test anti-régression
-  grep « Innov » interdit dans `resources/views/pdf/**`) ; doc client = « FACTURE »
-  + mention non-fiscale ; **en-tête pris sur le site d'impression** (`?site_id=`,
-  sinon site `PRINCIPAL`) pour le bon de commande **et la fiche technique** ;
-  coût fiche technique = meilleur prix catalogue (miroir lecture seule).
-- **Front : la portée de site est un tri-état** — « à choisir » (le shell impose
-  le choix au premier chargement), un site, ou la vue consolidée « tous mes
-  sites ». Les écrans opérationnels refusent le mode consolidé
+- **Un mode de paiement est un contenant** (`compte_en_caisse`) : le théorique de
+  caisse ne compte que ce qui finit **dans le tiroir**, et chaque contenant se
+  rapproche séparément → [[modele-encaissement-comptoir]].
+- **On ne souffle jamais le montant attendu** avant que le caissier ait compté —
+  ni le théorique, ni le fonds à reprendre. Un montant affiché se recopie, et la
+  comparaison ne vaut alors plus rien. Vrai à la fermeture, contenant par
+  contenant, et à l'ouverture.
+- **Les valeurs d'audit sont figées, jamais recalculées** : `montant_theorique`,
+  `montant_reel`, `ecart`, `ecart_ouverture`, le théorique par mode, la fiche
+  technique de la ligne vendue, le `table_numero` du document imprimé.
+- **Le CA est structurellement immunisé contre les pourboires** : tout le
+  reporting lit `Σ quantité × prix_unitaire` sur les lignes, jamais les
+  paiements. Seule la vue trésorerie lit les paiements, et somme `montant` seul.
+- **Rien ne bloque un service** : une vente n'est jamais refusée pour stock
+  insuffisant, une ouverture de caisse jamais refusée pour écart de transition.
+  Le système **signale**, il n'immobilise pas. Les seuls vrais blocages sont
+  l'impayé à la fermeture et le contenant non compté (ce dernier contournable
+  sous permission).
+- **PDF orientés revente** : zéro donnée d'établissement en dur (test
+  anti-régression), en-tête pris sur le site d'impression.
+- **Front : la portée de site est un tri-état** — « à choisir », un site, ou la
+  vue consolidée. Les écrans opérationnels refusent le mode consolidé
   → [[perimetre-site-applique]].
 
 ## Points d'attention
 
-1. **Prérequis déploiement / usage réel** :
-   - `php artisan migrate` puis `php artisan storage:link` (logos **et** photos
-     de produits).
-   - **php.ini prod** : `post_max_size` = `upload_max_filesize` = **8M** (sinon
-     upload logo coupé au *Request Startup* avant Laravel — cf. dev Herd déjà à 8M).
-   - **SMTP** + `FRONTEND_URL` configurés (reset mots de passe par email).
-   - **`PUBLIC_MENU_BASE_URL`** doit pointer sur le **front**, pas sur l'API :
-     à défaut la chaîne de repli retombe sur `APP_URL` et les QR mènent nulle part.
-     Ni cette variable ni `FRONTEND_URL` ne figurent dans `.env.example`.
-   - Avant d'appliquer le périmètre en prod, **vérifier qu'aucun compte n'est
-     orphelin** : `User::doesntHave('sites')->count()` doit valoir 0.
-2. **Le site `PRINCIPAL` n'a pas forcément de fiche d'établissement** : tout PDF
-   qui passe par le repli sortira alors sans en-tête. Soit on renseigne ses
-   paramètres, soit on fait du repli le premier site actif configuré.
-3. **Périmètre non appliqué sur `points_de_vente` et `parametre_etablissement`**,
-   qui portent aussi un `site_id`. Écrans de configuration réservés à des rôles
-   administratifs, donc enjeu moindre — mais ils restent hors de la frontière.
-4. **Carte** : `CarteService` + index unique partiel « une seule carte active par
-   PDV » (aujourd'hui app-level via `UpdateCarteRequest`). Pas urgent.
-5. **Convention de test** : chaque fichier définit son propre helper
-   `actingAs…`. Réutiliser un nom déjà pris provoque une **erreur fatale PHP**
-   (redéclaration de fonction) — la suite sort alors en code 255 **sans aucune
-   sortie**, alors que chaque fichier passe isolément.
+### Paramétrage à faire dans l'application
+
+1. **Modes de paiement** : la fermeture exige désormais qu'un compte soit saisi
+   pour **chaque mode actif**. Il faut donc désactiver « Virements » et
+   « Chèques » (non acceptés dans ce restaurant), et créer « Carte bancaire »
+   **décoché « en tiroir »** quand le TPE arrivera.
+2. **`pourboire.suivre_les_siens`** n'est attribuée à **aucun rôle** par choix :
+   l'écran « Mes pourboires » existe mais reste invisible tant que la direction
+   ne l'accorde pas. `session_caisse.forcer_fermeture` est allée au **gérant**,
+   pas au caissier.
+3. Après un déploiement, enchaîner **les deux** seeders :
+   `db:seed --class=PermissionSeeder` (enregistre les permissions) puis
+   `db:seed --class=RoleSeeder` (les attribue aux rôles système).
+   ⚠️ **`RoleSeeder` fait un `syncPermissions`** : il **REMPLACE** le jeu de
+   permissions de chaque rôle système par celui du code. Toute permission
+   accordée à la main depuis l'écran des rôles — `pourboire.suivre_les_siens` au
+   premier chef — est **silencieusement révoquée** au prochain passage. Si la
+   direction décide durablement d'ouvrir un accès, il faut l'inscrire dans
+   `RoleSeeder`, pas seulement dans l'interface.
+
+### Prérequis déploiement
+
+4. `php artisan migrate` puis `php artisan storage:link` (logos **et** photos).
+5. **php.ini prod** : `post_max_size` = `upload_max_filesize` = **8M** (sinon
+   upload logo coupé au *Request Startup*, avant Laravel).
+6. **`FRONTEND_URL` doit pointer sur le front**, jamais sur l'API. Elle sert aux
+   liens de réinitialisation de mot de passe **et** aux QR de table
+   (`PUBLIC_MENU_BASE_URL` → `FRONTEND_URL` → `APP_URL`). Absente, la chaîne de
+   repli tombait sur `APP_URL` et les QR menaient à un 404 sur l'API — c'était le
+   cas en dev jusqu'à aujourd'hui. Elle figure maintenant dans `.env.example`.
+   **Les QR déjà imprimés portent l'ancienne URL et sont à réimprimer.**
+7. **SMTP** configuré (reset mots de passe).
+8. Avant d'appliquer le périmètre en prod, vérifier qu'aucun compte n'est
+   orphelin : `User::doesntHave('sites')->count()` doit valoir 0.
+
+### Pièges techniques rencontrés (à ne pas redécouvrir)
+
+9. **SQLite reconstruit la table dès qu'on ajoute une clé étrangère**, et la
+   reconstruction **perd silencieusement les index partiels et les contraintes
+   CHECK**. Deux fois le cas cette session (index « une seule session ouverte »,
+   contrainte `destination` des versements). Toute migration qui ajoute une FK
+   doit **reposer explicitement** ce qu'elle risque d'emporter. Corollaire : les
+   tests peuvent être verts pendant que PostgreSQL rejette — **vérifier sur la
+   vraie base**.
+10. **`enum()->change()` produit du SQL invalide sur PostgreSQL.** Utiliser une
+    branche pgsql explicite (`ALTER COLUMN … TYPE` + `ADD CONSTRAINT`), ou
+    convertir la colonne en `string` et laisser l'enum PHP faire la loi.
+11. **Toute migration se valide par `migrate:rollback` puis re-migrate sur
+    PostgreSQL**, pas seulement à l'aller.
+12. **Budget de style Angular : 8 kB par composant.** Dépassé trois fois cette
+    session ; la parade est d'extraire les blocs partagés dans un `.scss`
+    voisin (`reglement.scss`, `caisse.page.scss`).
+13. **Convention de test API** : chaque fichier définit son propre helper
+    `actingAs…`. Réutiliser un nom déjà pris provoque une **erreur fatale PHP**
+    (redéclaration) — la suite sort en code 255 **sans aucune sortie**, alors que
+    chaque fichier passe isolément.
+14. `caisse.layout.spec.ts` laisse passer **2 « unhandled rejections »** du
+    routeur Angular (`NG04002` sur `vente/caisse/ventes` et `…/pourboires`) : le
+    test ne déclare pas ces routes. Les 141 tests passent, mais Vitest prévient
+    à juste titre que ce genre de bruit peut masquer un faux positif — à nettoyer.
+
+### Dettes connues
+
+15. **Le site `PRINCIPAL` n'a pas forcément de fiche d'établissement** : tout PDF
+    passant par le repli sortira sans en-tête.
+16. **Périmètre non appliqué sur `points_de_vente` et `parametre_etablissement`**,
+    qui portent pourtant un `site_id`. Écrans réservés à des rôles
+    administratifs, donc enjeu moindre — mais ils restent hors de la frontière.
+17. **Carte** : index unique partiel « une seule carte active par PDV » resté
+    app-level (`UpdateCarteRequest`). Pas urgent.
 
 ## Mémoires liées (décisions structurantes)
 
 `architecture-multi-site` · `perimetre-site-applique` · `module-utilisateurs-roles` ·
-`module-reporting` · `module-menu-public-qr` · `pmp-decimal-precision` ·
-`unites-de-mesure-etiquettes` · `convention-seeders-vs-demo` ·
-`carte-organisation-categories` · `commande-fournisseur-catalogue` · `front-app-inresto`.
+`module-reporting` · `module-menu-public-qr` · `modele-encaissement-comptoir` ·
+`caisse-addition-vs-recu` · `pmp-decimal-precision` · `unites-de-mesure-etiquettes` ·
+`convention-seeders-vs-demo` · `carte-organisation-categories` ·
+`commande-fournisseur-catalogue` · `front-app-inresto`.

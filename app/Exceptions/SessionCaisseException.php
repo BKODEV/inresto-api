@@ -27,4 +27,36 @@ class SessionCaisseException extends RuntimeException
     {
         return new self("La session de caisse (id: {$sessionId}) est déjà fermée.", 409);
     }
+
+    /**
+     * Un contenant n'a pas été compté.
+     *
+     * Tout mode de paiement accepté est vérifiable à la fermeture : on compte
+     * le tiroir, on lit le ticket du terminal. Laisser passer une case vide
+     * reviendrait à fermer sans avoir contrôlé, et l'écart de ce contenant ne
+     * se verrait jamais.
+     *
+     * @param  string[]  $modes
+     */
+    public static function rapprochementIncomplet(array $modes): self
+    {
+        return new self(
+            'Fermeture impossible : ces moyens de paiement n\'ont pas été comptés — '
+            .implode(', ', $modes).'.'
+        );
+    }
+
+    /**
+     * Des notes servies attendent encore leur règlement. Les laisser derrière
+     * une session fermée les rendrait orphelines : leur argent ne compterait
+     * dans le théorique d'aucune caisse.
+     */
+    public static function notesNonReglees(int $sessionId, int $nombre): self
+    {
+        return new self(
+            "La session de caisse (id: {$sessionId}) porte encore {$nombre} note(s) servie(s) non réglée(s) : "
+            .'soldez-les ou annulez-les avec un motif avant de fermer.',
+            409
+        );
+    }
 }

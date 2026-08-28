@@ -26,4 +26,23 @@ class LigneCommandeClientFactory extends Factory
             'statut' => Statut::Actif->value,
         ];
     }
+
+    /**
+     * Ligne partie en cuisine. Le cycle de vie vit sur la LIGNE : poser le
+     * statut de la note ne suffit pas à rendre une ligne visible au KDS ni
+     * servable.
+     */
+    public function envoyee(): static
+    {
+        return $this->state(['envoyee_le' => now()->subMinutes(5)]);
+    }
+
+    /** Ligne servie et déstockée : un second service ne la reprend pas. */
+    public function servie(): static
+    {
+        return $this->state([
+            'envoyee_le' => now()->subMinutes(10),
+            'servie_le' => now()->subMinutes(2),
+        ]);
+    }
 }

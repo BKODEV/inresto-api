@@ -29,6 +29,9 @@ class ParametreEtablissementFactory extends Factory
             'rccm' => fake()->optional()->bothify('CI-ABJ-####-?-#####'),
             'regime_fiscal' => fake()->optional()->randomElement(['Réel normal', 'Réel simplifié', 'TEE']),
             'devise' => 'XOF',
+            // 0 par défaut : les tests qui s'intéressent à la tolérance la
+            // posent explicitement, les autres gardent la règle désactivée.
+            'tolerance_ecart_caisse' => 0,
             'mentions_pied_page' => fake()->optional()->sentence(),
         ];
     }

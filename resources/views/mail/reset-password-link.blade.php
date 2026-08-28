@@ -12,5 +12,5 @@ Choisir un nouveau mot de passe
 Si vous n'êtes pas à l'origine de cette demande, ignorez simplement cet email : votre mot de passe restera inchangé.
 
 Cordialement,<br>
-L'équipe {{ config('app.name') }}
+L'équipe Innov Immobilier
 </x-mail::message>

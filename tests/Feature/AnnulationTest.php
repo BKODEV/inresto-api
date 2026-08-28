@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Enums\StatutTable;
+use App\Models\Annulation;
 use App\Models\CommandeClient;
 use App\Models\FicheTechnique;
 use App\Models\LigneCommandeClient;
@@ -19,18 +20,56 @@ uses(RefreshDatabase::class);
 
 // ───────────────────────── annulation de ligne ─────────────────────────
 
-it('annule une ligne d\'une commande ouverte : inactive + montant recalculé', function () {
+/**
+ * Ligne jamais partie en cuisine : rien n'a été produit ni déstocké. La retirer
+ * n'est pas une annulation — sans motif, sans trace. Écrire une `annulation`
+ * ici noierait celles qui comptent sous le bruit des « le client a changé
+ * d'avis », qui sont fréquentes en salle.
+ */
+it('retire une ligne de brouillon sans motif ni trace', function () {
     $ctx = salleContext();
     $user = actingAsServeur($ctx->site, ['annulation.create', 'session_caisse.utiliser']);
     $produit = produitSurCarte($ctx, 10);
     $commande = commandeSur($ctx, $user, 'ouverte');
     $ligne = LigneCommandeClient::factory()->create(['commande_client_id' => $commande->id, 'produit_id' => $produit->id, 'quantite' => 2, 'prix_unitaire' => 10]);
 
-    deleteJson("/api/commandes-client/{$commande->id}/lignes/{$ligne->id}", ['motif' => 'erreur de saisie'])
+    deleteJson("/api/commandes-client/{$commande->id}/lignes/{$ligne->id}")
+        ->assertOk();
+
+    expect(LigneCommandeClient::find($ligne->id))->toBeNull()
+        ->and(Annulation::count())->toBe(0)
+        ->and($commande->fresh()->montant_total)->toBe('0.00');
+});
+
+/**
+ * Dès que la ligne est partie, la cuisine a pu commencer : le motif redevient
+ * légitime, et la ligne est conservée en `inactif` pour la piste d'audit.
+ */
+it('annule une ligne envoyée en cuisine : inactive, tracée, montant recalculé', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['annulation.create', 'session_caisse.utiliser']);
+    $produit = produitSurCarte($ctx, 10);
+    $commande = commandeSur($ctx, $user, 'envoyee_en_cuisine');
+    $ligne = LigneCommandeClient::factory()->envoyee()->create(['commande_client_id' => $commande->id, 'produit_id' => $produit->id, 'quantite' => 2, 'prix_unitaire' => 10]);
+
+    deleteJson("/api/commandes-client/{$commande->id}/lignes/{$ligne->id}", ['motif' => 'plat renvoyé'])
         ->assertOk();
 
     expect($ligne->fresh()->statut->value)->toBe('inactif')
+        ->and(Annulation::count())->toBe(1)
         ->and($commande->fresh()->montant_total)->toBe('0.00');
+});
+
+it('exige un motif pour annuler une ligne déjà envoyée (422)', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['annulation.create', 'session_caisse.utiliser']);
+    $produit = produitSurCarte($ctx, 10);
+    $commande = commandeSur($ctx, $user, 'envoyee_en_cuisine');
+    $ligne = LigneCommandeClient::factory()->envoyee()->create(['commande_client_id' => $commande->id, 'produit_id' => $produit->id]);
+
+    deleteJson("/api/commandes-client/{$commande->id}/lignes/{$ligne->id}")
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('motif');
 });
 
 it('annule une ligne servie avec remise_en_stock : mouvements entree créés', function () {
@@ -42,7 +81,7 @@ it('annule une ligne servie avec remise_en_stock : mouvements entree créés', f
     LigneFicheTechnique::factory()->create(['fiche_technique_id' => $fiche->id, 'matiere_premiere_id' => $matiere->id, 'quantite' => 2]);
 
     $commande = commandeSur($ctx, $user, 'servie');
-    $ligne = LigneCommandeClient::factory()->create([
+    $ligne = LigneCommandeClient::factory()->servie()->create([
         'commande_client_id' => $commande->id,
         'produit_id' => $produit->id,
         'quantite' => 3,
@@ -72,7 +111,7 @@ it('annule une ligne servie en perte : tracée, aucun mouvement supplémentaire'
     LigneFicheTechnique::factory()->create(['fiche_technique_id' => $fiche->id, 'matiere_premiere_id' => $matiere->id, 'quantite' => 2]);
 
     $commande = commandeSur($ctx, $user, 'servie');
-    $ligne = LigneCommandeClient::factory()->create(['commande_client_id' => $commande->id, 'produit_id' => $produit->id, 'quantite' => 3, 'fiche_technique_id' => $fiche->id]);
+    $ligne = LigneCommandeClient::factory()->servie()->create(['commande_client_id' => $commande->id, 'produit_id' => $produit->id, 'quantite' => 3, 'fiche_technique_id' => $fiche->id]);
 
     deleteJson("/api/commandes-client/{$commande->id}/lignes/{$ligne->id}", [
         'motif' => 'jeté',
@@ -88,7 +127,7 @@ it('annule une ligne servie sans fiche figée (remise_en_stock) : log, pas d\'er
     $user = actingAsServeur($ctx->site, ['annulation.create', 'session_caisse.utiliser']);
     $produit = produitSurCarte($ctx, 10);
     $commande = commandeSur($ctx, $user, 'servie');
-    $ligne = LigneCommandeClient::factory()->create(['commande_client_id' => $commande->id, 'produit_id' => $produit->id, 'quantite' => 1]); // fiche_technique_id null
+    $ligne = LigneCommandeClient::factory()->servie()->create(['commande_client_id' => $commande->id, 'produit_id' => $produit->id, 'quantite' => 1]); // fiche_technique_id null
 
     deleteJson("/api/commandes-client/{$commande->id}/lignes/{$ligne->id}", [
         'motif' => 'renvoyé',

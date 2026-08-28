@@ -33,6 +33,7 @@ class ParametreEtablissementResource extends JsonResource
             'rccm' => $this->rccm,
             'regime_fiscal' => $this->regime_fiscal,
             'devise' => $this->devise,
+            'tolerance_ecart_caisse' => $this->tolerance_ecart_caisse,
             'mentions_pied_page' => $this->mentions_pied_page,
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),

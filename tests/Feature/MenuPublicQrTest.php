@@ -11,6 +11,7 @@ use App\Models\Produit;
 use App\Models\Site;
 use App\Models\TableSalle;
 use App\Models\User;
+use App\Services\PdfService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
@@ -258,6 +259,22 @@ it('renvoie 404 sur un jeton inconnu', function () {
     getJson('/api/public/menu/'.str_repeat('z', 32))->assertNotFound();
 });
 
+/**
+ * Un autocollant QR survit à la table qu'il désigne. Archiver doit donc éteindre
+ * le menu, et le faire sans révéler que la table a existé : même 404 neutre que
+ * pour un jeton inventé.
+ */
+it('renvoie 404 sur le jeton d\'une table archivée', function () {
+    ['table' => $table] = salleAvecCarteActive();
+    $url = "/api/public/menu/{$table->public_token}";
+
+    getJson($url)->assertOk();
+
+    $table->update(['archivee_le' => now()]);
+
+    getJson($url)->assertNotFound();
+});
+
 it('limite le nombre d\'appels au menu public', function () {
     ['table' => $table] = salleAvecCarteActive();
     $url = "/api/public/menu/{$table->public_token}";
@@ -290,6 +307,22 @@ it('génère la planche de QR d\'un point de vente', function () {
     $reponse = getJson("/api/points-de-vente/{$pdv->id}/qr-planche-pdf")->assertOk();
 
     expect($reponse->headers->get('content-type'))->toContain('application/pdf');
+});
+
+/**
+ * La planche sert à imprimer les autocollants à coller en salle. Y faire figurer
+ * une table archivée remettrait en circulation un QR qui ne sert plus de menu.
+ * Le HTML est inspecté directement : le PDF binaire ne se lit pas en assertion.
+ */
+it('omet les tables archivées de la planche QR', function () {
+    ['pointDeVente' => $pdv] = salleAvecCarteActive();
+    TableSalle::factory()->create(['point_de_vente_id' => $pdv->id, 'numero' => 'EN-SALLE']);
+    TableSalle::factory()->archivee()->create(['point_de_vente_id' => $pdv->id, 'numero' => 'RETIREE']);
+
+    $html = app(PdfService::class)->htmlQrPlanchePointDeVente($pdv);
+
+    expect($html)->toContain('EN-SALLE')
+        ->and($html)->not->toContain('RETIREE');
 });
 
 it('refuse les PDF de QR sans la permission table.view', function () {

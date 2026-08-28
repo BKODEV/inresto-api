@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Enums\StatutCommandeClient;
 use App\Enums\StatutSessionCaisse;
 use App\Exceptions\SessionCaisseException;
 use App\Models\SessionCaisse;
@@ -13,10 +14,15 @@ use Illuminate\Support\Facades\DB;
  * Cycle de vie d'une session de caisse : ouverture (une seule ouverte par
  * caisse) et fermeture (rapprochement réel/théorique, calcul de l'écart).
  *
- * POINTS D'EXTENSION (TODO Lot C) :
- *  - `montant_theorique` agrège `fonds_initial + Σ paiements encaissés`. La table
- *    `paiements` n'existe pas encore : `SessionCaisse::montantPaye()` renvoie 0,
- *    donc montant_theorique = fonds_initial pour l'instant. À brancher au Lot C.
+ * `montant_theorique` agrège `fonds_initial + Σ paiements EN TIROIR de la
+ * session`, via {@see SessionCaisse::montantEnCaisse()}. Seuls les modes marqués
+ * `compte_en_caisse` y entrent : `montant_reel` est ce que le caissier a
+ * physiquement compté, et un virement n'y figure pas.
+ *
+ * Le rapprochement suppose toujours que la saisie a lieu au moment où l'argent
+ * est remis — un paiement enregistré compte immédiatement comme en tiroir.
+ *
+ * POINT D'EXTENSION :
  *  - Le périmètre d'accès « utiliser une session » se remonte via
  *    caisse → point de vente → site, croisé avec le pivot `user_site` et la
  *    permission `session_caisse.utiliser`. Contrôle appliqué au Lot C (création
@@ -55,35 +61,197 @@ class SessionCaisseService
             $session->user_id = $userId;
             $session->statut = StatutSessionCaisse::Ouverte;
             $session->ouvert_le = now();
+            $session->ecart_ouverture = $this->ecartDeTransition($caisseId, (float) $session->fonds_initial);
             $session->save();
+
+            $this->reporterNotesEnCours($caisseId, $session);
 
             return $session->load(['caisse.pointDeVente.site', 'user']);
         });
     }
 
     /**
-     * Ferme une session ouverte : fige montant_theorique, montant_reel, ecart et
-     * ferme_le. Seule une session ouverte peut être fermée (409 sinon).
+     * Refuse une fermeture qui laisse un contenant sans compte.
      *
-     * @param  array{montant_reel: float|string, notes?: string|null}  $data
+     * Chaque mode accepté correspond à un endroit vérifiable le soir même : on
+     * compte le tiroir, on lit le ticket du terminal. Un mode qu'on ne saurait
+     * pas contrôler n'a pas à rester actif — il se désactive dans les
+     * paramètres, et disparaît alors de la fermeture.
+     *
+     * Zéro est un compte valide et attendu ; c'est l'absence de saisie qui est
+     * refusée.
+     *
+     * @param  array<int, array{mode_de_paiement_id: int, montant_constate?: float|string|null}>  $declares
      *
      * @throws SessionCaisseException
      */
-    public function fermer(SessionCaisse $session, array $data): SessionCaisse
+    private function assertTousLesContenantsComptes(SessionCaisse $session, array $declares): void
+    {
+        $comptes = collect($declares)
+            ->filter(fn (array $ligne): bool => ($ligne['montant_constate'] ?? null) !== null)
+            ->pluck('mode_de_paiement_id')
+            ->all();
+
+        $manquants = collect($session->theoriqueParMode())
+            ->reject(fn (array $ligne): bool => in_array($ligne['mode']->id, $comptes, true))
+            ->map(fn (array $ligne): string => $ligne['mode']->libelle)
+            ->all();
+
+        if ($manquants !== []) {
+            throw SessionCaisseException::rapprochementIncomplet($manquants);
+        }
+    }
+
+    /**
+     * Fige un rapprochement par mode de paiement actif, et renvoie le total
+     * constaté dans le TIROIR — ou null si personne n'y a rien compté.
+     *
+     * Le théorique de chaque contenant est gelé ici : un rapprochement est une
+     * pièce d'audit, il ne se recalcule pas après coup.
+     *
+     * @param  array<int, array{mode_de_paiement_id: int, montant_constate?: float|string|null}>  $declares
+     */
+    private function figerRapprochements(SessionCaisse $session, array $declares): ?float
+    {
+        $parMode = collect($declares)->keyBy('mode_de_paiement_id');
+
+        $tiroir = null;
+
+        foreach ($session->theoriqueParMode() as $ligne) {
+            $mode = $ligne['mode'];
+            $declare = $parMode->get($mode->id)['montant_constate'] ?? null;
+            $constate = $declare === null ? null : round((float) $declare, 2);
+
+            $session->rapprochements()->create([
+                'mode_de_paiement_id' => $mode->id,
+                'montant_theorique' => $ligne['theorique'],
+                'montant_constate' => $constate,
+                'ecart' => $constate === null ? null : round($constate - $ligne['theorique'], 2),
+            ]);
+
+            if ($mode->compte_en_caisse && $constate !== null) {
+                $tiroir = round(($tiroir ?? 0.0) + $constate, 2);
+            }
+        }
+
+        return $tiroir;
+    }
+
+    /**
+     * Ce qui manque — ou ce qui est en trop — entre deux services.
+     *
+     * On attend de retrouver dans le tiroir ce que la session précédente y a
+     * laissé, moins ce qui en est sorti depuis. Un passage de main à main entre
+     * caissiers donne zéro ; un versement qui explique exactement la différence
+     * aussi. Tout le reste est à justifier.
+     *
+     * Le montant n'est ni imposé ni contrôlé à la saisie : le caissier compte et
+     * déclare, le système compare ensuite. Lui souffler le montant attendu
+     * l'inviterait à le recopier sans ouvrir le tiroir, et la comparaison ne
+     * vaudrait plus rien.
+     *
+     * Null quand il n'y a rien à comparer : première session de la caisse, ou
+     * précédente fermée sans que le tiroir ait été compté.
+     */
+    private function ecartDeTransition(int $caisseId, float $fondsInitial): ?float
+    {
+        $precedente = SessionCaisse::query()
+            ->where('caisse_id', $caisseId)
+            ->where('statut', StatutSessionCaisse::Fermee->value)
+            ->orderByDesc('ferme_le')
+            ->first();
+
+        if ($precedente?->montant_reel === null) {
+            return null;
+        }
+
+        $attendu = (float) $precedente->montant_reel - $precedente->montantVerseApresFermeture();
+
+        return round($fondsInitial - $attendu, 2);
+    }
+
+    /**
+     * Reprend les notes encore en service laissées par la session précédente.
+     *
+     * Une table qui mange encore à l'heure de la relève ne doit ni bloquer la
+     * fermeture ni rester attachée à une caisse close : son règlement viendra
+     * dans la session qui suit, et c'est là qu'il doit compter.
+     *
+     * Le report a lieu à l'OUVERTURE et non à la fermeture, faute de session
+     * d'accueil à ce moment-là.
+     *
+     * Aucun argent ne change de tiroir au passage : un paiement n'est accepté
+     * que sur une note SERVIE ({@see PaiementService::ajouter()}), donc une note
+     * encore en cours n'en porte aucun.
+     */
+    private function reporterNotesEnCours(int $caisseId, SessionCaisse $nouvelle): void
+    {
+        $precedente = SessionCaisse::query()
+            ->where('caisse_id', $caisseId)
+            ->whereKeyNot($nouvelle->id)
+            ->orderByDesc('id')
+            ->first();
+
+        if ($precedente === null) {
+            return;
+        }
+
+        $precedente->commandes()
+            ->whereIn('statut', [
+                StatutCommandeClient::Ouverte->value,
+                StatutCommandeClient::EnvoyeeEnCuisine->value,
+            ])
+            ->update(['session_caisse_id' => $nouvelle->id]);
+    }
+
+    /**
+     * Ferme une session ouverte : fige montant_theorique, montant_reel, ecart et
+     * ferme_le. Seule une session ouverte peut être fermée (409 sinon).
+     *
+     * @param  array{rapprochements?: array<int, array{mode_de_paiement_id: int, montant_constate?: float|string|null}>, forcer?: bool, motif_forcage?: string|null, notes?: string|null}  $data
+     * @param  string|null  $userId  Signataire de la fermeture.
+     *
+     * @throws SessionCaisseException
+     */
+    public function fermer(SessionCaisse $session, array $data, ?string $userId = null): SessionCaisse
     {
         if (! $session->estOuverte()) {
             throw SessionCaisseException::dejaFermee($session->id);
         }
 
-        return DB::transaction(function () use ($session, $data): SessionCaisse {
-            // TODO Lot C : remplacer montantPaye() (=0) par la somme réelle des paiements.
-            $montantTheorique = (float) $session->fonds_initial + $session->montantPaye();
-            $montantReel = (float) $data['montant_reel'];
+        // Une note servie non réglée est un impayé : le client a consommé et
+        // n'a pas payé. Fermer par-dessus la rendrait orpheline — son argent ne
+        // compterait dans le théorique d'aucune caisse, et l'impayé
+        // disparaîtrait sans trace. Les notes encore en cours de service, elles,
+        // ne bloquent pas : voir ouvrir(), qui les reporte.
+        $impayees = $session->notesServiesNonReglees();
 
-            $session->montant_theorique = $montantTheorique;
-            $session->montant_reel = $montantReel;
-            $session->ecart = $montantReel - $montantTheorique;
+        if ($impayees->isNotEmpty()) {
+            throw SessionCaisseException::notesNonReglees($session->id, $impayees->count());
+        }
+
+        // Le forçage passe outre le compte, jamais l'impayé : une note servie
+        // non réglée reste bloquante, elle se solde ou s'annule.
+        if (! ($data['forcer'] ?? false)) {
+            $this->assertTousLesContenantsComptes($session, $data['rapprochements'] ?? []);
+        }
+
+        return DB::transaction(function () use ($session, $data, $userId): SessionCaisse {
+            $tiroir = $this->figerRapprochements($session, $data['rapprochements'] ?? []);
+
+            $session->montant_theorique = (float) $session->fonds_initial + $session->montantEnCaisse();
+            // Null et non zéro quand rien n'a été constaté dans le tiroir :
+            // annoncer un manquant égal à la recette du service parce que
+            // personne n'a compté serait pire que de ne rien annoncer.
+            $session->montant_reel = $tiroir;
+            $session->ecart = $tiroir === null ? null : $tiroir - $session->montant_theorique;
             $session->ferme_le = now();
+            // Le geste de fermeture fige l'écart : le signer complète la piste
+            // d'audit, `user_id` ne désignant que l'ouverture.
+            $session->ferme_par = $userId;
+            // Renseigné = la fermeture a été forcée. Les contenants non comptés
+            // restent « non rapprochés », sans écart inventé.
+            $session->motif_forcage = ($data['forcer'] ?? false) ? $data['motif_forcage'] : null;
             $session->statut = StatutSessionCaisse::Fermee;
 
             if (array_key_exists('notes', $data)) {
@@ -92,7 +260,16 @@ class SessionCaisseService
 
             $session->save();
 
-            return $session->load(['caisse.pointDeVente.site', 'user']);
+            // La fiche d'établissement porte la tolérance d'écart : sans elle, le
+            // `ecart_sens` renvoyé juste après la fermeture serait calculé avec
+            // une tolérance de 0, et annoncerait « manquant » là où le site
+            // tolère l'écart. Même chaîne que SessionCaisseController::RELATIONS.
+            return $session->load([
+                'caisse.pointDeVente.site.parametreEtablissement',
+                'user',
+                'fermePar',
+                'rapprochements.modePaiement',
+            ]);
         });
     }
 }

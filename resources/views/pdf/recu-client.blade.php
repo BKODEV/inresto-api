@@ -1,8 +1,43 @@
 @php
+    use App\Enums\TypeImpression;
     use App\Helpers\Devise;
     $devise = $parametre?->devise;
     $lignesActives = $commande->lignes->filter(fn ($ligne) => $ligne->estActive());
     $reste = $commande->resteAPayer();
+
+    // Deux états d'un seul ticket. L'addition DEMANDE le paiement, le reçu le
+    // PROUVE : c'est le même papier à deux moments du service, pas deux
+    // gabarits à maintenir en parallèle.
+    $estAddition = $type === TypeImpression::Addition;
+
+    // Ce que le client a effectivement tendu. `montant` est ce qui RESTE en
+    // tiroir ; `montant_recu` le billet posé sur le comptoir. À défaut du
+    // second, le premier fait foi — c'est le cas d'une carte, et celui des
+    // paiements enregistrés avant que la colonne n'existe, où un surpaiement
+    // portait la monnaie.
+    $totalTendu = $commande->paiements->sum(fn ($p) => (float) ($p->montant_recu ?? $p->montant));
+
+    // Ce que le client a laissé au serveur : dans le tiroir, mais pas rendu.
+    $pourboire = round((float) $commande->paiements->sum('pourboire'), 2);
+
+    // N'a de sens que sur le reçu : une addition qui annoncerait la monnaie
+    // serait absurde.
+    //
+    // Le pourboire se retranche du tendu, sans quoi le ticket annoncerait au
+    // client une monnaie qu'il ne recevra pas — il l'a laissée. Négative, elle
+    // dit qu'il reste à payer : c'est la ligne « Reste » qui l'annonce.
+    $monnaie = round($totalTendu - $commande->montantDu() - $pourboire, 2);
+
+    // Le client a-t-il posé des espèces sur le comptoir ? `montant_recu` étant
+    // désormais obligatoire dès que l'argent passe par le tiroir, l'appoint
+    // juste se distingue de la carte : l'un a un billet tendu, l'autre non. Le
+    // reçu doit donc annoncer ce qui a été reçu même sans un franc à rendre —
+    // sinon il tait le geste que le client vient de faire.
+    //
+    // Le `|| $monnaie > 0` couvre les paiements antérieurs à la colonne, où le
+    // billet se devinait d'un surpaiement.
+    $especesTendues = $commande->paiements->contains(fn ($p) => $p->montant_recu !== null);
+    $afficherTendu = $especesTendues || $monnaie > 0;
 @endphp
 <!DOCTYPE html>
 <html lang="fr">
@@ -21,6 +56,8 @@
         td { padding: 1px 0; vertical-align: top; }
         .num { text-align: right; }
         .total { font-size: 12px; font-weight: bold; }
+        .titre { font-size: 12px; font-weight: bold; letter-spacing: 1px; margin-bottom: 2px; }
+        .pu { padding: 0 0 1px 12px; font-size: 9px; }
     </style>
 </head>
 <body>
@@ -40,9 +77,11 @@
 
     <div class="sep"></div>
 
+    <div class="center titre">{{ $estAddition ? 'ADDITION' : 'REÇU' }}</div>
+    <div>N° {{ $commande->id }}</div>
     <div>{{ optional($commande->date_heure)->format('d/m/Y H:i') }}</div>
     @if ($commande->table)
-        <div>Table : {{ $commande->table->numero }}</div>
+        <div>Table : {{ $commande->table_numero ?? $commande->table->numero }}</div>
     @endif
     @if ($commande->user)
         <div>Serveur : {{ trim($commande->user->prenom.' '.$commande->user->nom) }}</div>
@@ -56,6 +95,14 @@
                 <td>{{ $ligne->quantite }} × {{ $ligne->produit?->libelle }}</td>
                 <td class="num">{{ Devise::formater((float) $ligne->quantite * (float) $ligne->prix_unitaire, $devise) }}</td>
             </tr>
+            {{-- Le prix unitaire, seulement là où il apprend quelque chose : sur
+                 une quantité de 1 il répète le total de la ligne, et 72 mm ne
+                 supportent pas la redondance. --}}
+            @if ($ligne->quantite > 1)
+                <tr>
+                    <td class="pu" colspan="2">P.U. {{ Devise::formater((float) $ligne->prix_unitaire, $devise) }}</td>
+                </tr>
+            @endif
         @endforeach
     </table>
 
@@ -63,22 +110,52 @@
 
     <table>
         <tr class="total">
-            <td>TOTAL</td>
+            <td>{{ $estAddition ? 'TOTAL À PAYER' : 'TOTAL' }}</td>
             <td class="num">{{ Devise::formater($commande->montantDu(), $devise) }}</td>
         </tr>
-        @foreach ($commande->paiements as $paiement)
-            <tr>
-                <td>{{ $paiement->modePaiement?->libelle ?? 'Paiement' }}</td>
-                <td class="num">{{ Devise::formater((float) $paiement->montant, $devise) }}</td>
-            </tr>
-        @endforeach
-        <tr>
-            <td>{{ $reste >= 0 ? 'Reste' : 'Monnaie' }}</td>
-            <td class="num">{{ Devise::formater(abs($reste), $devise) }}</td>
-        </tr>
+
+        {{-- Une addition ne montre pas les paiements : elle précède l'argent. --}}
+        @unless ($estAddition)
+            @foreach ($commande->paiements as $paiement)
+                <tr>
+                    <td>{{ $paiement->modePaiement?->libelle ?? 'Paiement' }}</td>
+                    <td class="num">{{ Devise::formater((float) $paiement->montant, $devise) }}</td>
+                </tr>
+            @endforeach
+
+            @if ($pourboire > 0)
+                <tr>
+                    <td>Dont pourboire</td>
+                    <td class="num">{{ Devise::formater($pourboire, $devise) }}</td>
+                </tr>
+            @endif
+
+            @if ($afficherTendu)
+                <tr>
+                    <td>Reçu</td>
+                    <td class="num">{{ Devise::formater($totalTendu, $devise) }}</td>
+                </tr>
+                {{-- Une monnaie négative n'est pas une monnaie : c'est un reste
+                     à payer, que la ligne suivante annonce déjà. --}}
+                @if ($monnaie >= 0)
+                    <tr class="total">
+                        <td>MONNAIE</td>
+                        <td class="num">{{ Devise::formater($monnaie, $devise) }}</td>
+                    </tr>
+                @endif
+            @endif
+
+            @if ($reste > 0)
+                <tr>
+                    <td>Reste</td>
+                    <td class="num">{{ Devise::formater($reste, $devise) }}</td>
+                </tr>
+            @endif
+        @endunless
     </table>
 
     <div class="sep"></div>
-    <div class="center">Merci de votre visite</div>
+    {{-- On ne remercie pas d'une visite qu'on n'a pas encore réglée. --}}
+    <div class="center">{{ $estAddition ? 'Règlement au comptoir' : 'Merci de votre visite' }}</div>
 </body>
 </html>

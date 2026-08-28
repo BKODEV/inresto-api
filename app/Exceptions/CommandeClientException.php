@@ -24,6 +24,26 @@ class CommandeClientException extends RuntimeException
         return new self("La table (id: {$tableId}) doit être libre ou réservée pour ouvrir une commande.", 409);
     }
 
+    public static function noteClose(int $commandeId): self
+    {
+        return new self("La note (id: {$commandeId}) est close : elle ne peut plus être modifiée.", 409);
+    }
+
+    public static function serviceSansLigne(int $commandeId): self
+    {
+        return new self("Aucune ligne en attente de service sur la note (id: {$commandeId}).", 409);
+    }
+
+    public static function tableArchivee(int $tableId): self
+    {
+        return new self("La table (id: {$tableId}) est archivée : réactivez-la pour y ouvrir une commande.", 409);
+    }
+
+    public static function liberationImpossible(int $commandeId): self
+    {
+        return new self("La commande (id: {$commandeId}) a déjà porté des lignes ou des paiements : elle doit être annulée avec un motif, pas supprimée.", 409);
+    }
+
     public static function commandeActiveExistante(int $tableId): self
     {
         return new self("Une commande est déjà en cours sur la table (id: {$tableId}).", 409);
