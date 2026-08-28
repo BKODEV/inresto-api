@@ -20,12 +20,24 @@
     // Ce que le client a laissé au serveur : dans le tiroir, mais pas rendu.
     $pourboire = round((float) $commande->paiements->sum('pourboire'), 2);
 
-    // Positive uniquement quand il y a eu de la monnaie à rendre. N'a de sens
-    // que sur le reçu : une addition qui annoncerait la monnaie serait absurde.
+    // N'a de sens que sur le reçu : une addition qui annoncerait la monnaie
+    // serait absurde.
     //
     // Le pourboire se retranche du tendu, sans quoi le ticket annoncerait au
-    // client une monnaie qu'il ne recevra pas — il l'a laissée.
+    // client une monnaie qu'il ne recevra pas — il l'a laissée. Négative, elle
+    // dit qu'il reste à payer : c'est la ligne « Reste » qui l'annonce.
     $monnaie = round($totalTendu - $commande->montantDu() - $pourboire, 2);
+
+    // Le client a-t-il posé des espèces sur le comptoir ? `montant_recu` étant
+    // désormais obligatoire dès que l'argent passe par le tiroir, l'appoint
+    // juste se distingue de la carte : l'un a un billet tendu, l'autre non. Le
+    // reçu doit donc annoncer ce qui a été reçu même sans un franc à rendre —
+    // sinon il tait le geste que le client vient de faire.
+    //
+    // Le `|| $monnaie > 0` couvre les paiements antérieurs à la colonne, où le
+    // billet se devinait d'un surpaiement.
+    $especesTendues = $commande->paiements->contains(fn ($p) => $p->montant_recu !== null);
+    $afficherTendu = $especesTendues || $monnaie > 0;
 @endphp
 <!DOCTYPE html>
 <html lang="fr">
@@ -45,6 +57,7 @@
         .num { text-align: right; }
         .total { font-size: 12px; font-weight: bold; }
         .titre { font-size: 12px; font-weight: bold; letter-spacing: 1px; margin-bottom: 2px; }
+        .pu { padding: 0 0 1px 12px; font-size: 9px; }
     </style>
 </head>
 <body>
@@ -82,6 +95,14 @@
                 <td>{{ $ligne->quantite }} × {{ $ligne->produit?->libelle }}</td>
                 <td class="num">{{ Devise::formater((float) $ligne->quantite * (float) $ligne->prix_unitaire, $devise) }}</td>
             </tr>
+            {{-- Le prix unitaire, seulement là où il apprend quelque chose : sur
+                 une quantité de 1 il répète le total de la ligne, et 72 mm ne
+                 supportent pas la redondance. --}}
+            @if ($ligne->quantite > 1)
+                <tr>
+                    <td class="pu" colspan="2">P.U. {{ Devise::formater((float) $ligne->prix_unitaire, $devise) }}</td>
+                </tr>
+            @endif
         @endforeach
     </table>
 
@@ -109,15 +130,19 @@
                 </tr>
             @endif
 
-            @if ($monnaie > 0)
+            @if ($afficherTendu)
                 <tr>
                     <td>Reçu</td>
                     <td class="num">{{ Devise::formater($totalTendu, $devise) }}</td>
                 </tr>
-                <tr class="total">
-                    <td>MONNAIE</td>
-                    <td class="num">{{ Devise::formater($monnaie, $devise) }}</td>
-                </tr>
+                {{-- Une monnaie négative n'est pas une monnaie : c'est un reste
+                     à payer, que la ligne suivante annonce déjà. --}}
+                @if ($monnaie >= 0)
+                    <tr class="total">
+                        <td>MONNAIE</td>
+                        <td class="num">{{ Devise::formater($monnaie, $devise) }}</td>
+                    </tr>
+                @endif
             @endif
 
             @if ($reste > 0)

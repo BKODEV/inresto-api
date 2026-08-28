@@ -79,6 +79,7 @@ it('remonte un paiement avec son auteur et son montant', function () {
     postJson("/api/commandes-client/{$commande->id}/paiements", [
         'mode_de_paiement_id' => $mode->id,
         'montant' => 2500,
+        'montant_recu' => 3000,
     ])->assertCreated();
 
     getJson('/api/journal?type[]=paiement')

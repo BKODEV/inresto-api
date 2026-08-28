@@ -45,6 +45,7 @@ it('enregistre un paiement sur une commande servie', function () {
     postJson("/api/commandes-client/{$commande->id}/paiements", [
         'mode_de_paiement_id' => $mode->id,
         'montant' => 50,
+        'montant_recu' => 50,
     ])->assertCreated();
 
     expect($commande->montantPaye())->toBe(50.0);
@@ -88,11 +89,33 @@ it('refuse un montant reçu inférieur au montant encaissé (422)', function () 
     ])->assertStatus(422)->assertJsonValidationErrors('montant_recu');
 });
 
-it('accepte un paiement sans espèces tendues (carte, appoint juste)', function () {
+/**
+ * Sans espèces tendues, la monnaie rendue ne se déduit pas : le reçu retombait
+ * sur le montant encaissé et affirmait un appoint juste que personne n'avait
+ * constaté. C'est au comptoir que le billet se saisit, pas à l'impression.
+ */
+it('refuse un paiement en espèces sans les espèces tendues (422)', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['paiement.create', 'session_caisse.utiliser']);
+    $commande = commandeServieAvecLigne($ctx, $user, 7500, 1);
+    $especes = ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
+
+    postJson("/api/commandes-client/{$commande->id}/paiements", [
+        'mode_de_paiement_id' => $especes->id,
+        'montant' => 7500,
+    ])->assertStatus(422)->assertJsonValidationErrors('montant_recu');
+});
+
+/**
+ * Hors tiroir, aucun billet n'est posé sur le comptoir : exiger un montant reçu
+ * ferait saisir une valeur qui n'existe pas, et le reçu n'a aucune monnaie à
+ * annoncer.
+ */
+it('accepte un paiement sans espèces tendues (carte)', function () {
     $ctx = salleContext();
     $user = actingAsServeur($ctx->site, ['paiement.create', 'session_caisse.utiliser']);
     $commande = commandeServieAvecLigne($ctx, $user, 50, 1);
-    $mode = ModeDePaiement::factory()->create();
+    $mode = ModeDePaiement::factory()->horsTiroir()->create(['libelle' => 'Carte bancaire']);
 
     postJson("/api/commandes-client/{$commande->id}/paiements", [
         'mode_de_paiement_id' => $mode->id,
@@ -174,7 +197,7 @@ it('accepte un pourboire sans espèces tendues (paiement par carte)', function (
     $ctx = salleContext();
     $user = actingAsServeur($ctx->site, ['paiement.create', 'session_caisse.utiliser']);
     $commande = commandeServieAvecLigne($ctx, $user, 5000, 1);
-    $mode = ModeDePaiement::factory()->create();
+    $mode = ModeDePaiement::factory()->horsTiroir()->create(['libelle' => 'Carte bancaire']);
 
     postJson("/api/commandes-client/{$commande->id}/paiements", [
         'mode_de_paiement_id' => $mode->id,
@@ -182,7 +205,9 @@ it('accepte un pourboire sans espèces tendues (paiement par carte)', function (
         'pourboire' => 750,
     ])->assertCreated()->assertJsonPath('data.pourboire', '750.00');
 
-    expect($ctx->session->montantEnCaisse())->toBe(5750.0);
+    // Rien dans le tiroir : ni la vente ni le pourboire n'y sont passés.
+    expect($ctx->session->montantEnCaisse())->toBe(0.0)
+        ->and($ctx->session->totalPourboires())->toBe(750.0);
 });
 
 it('laisse le pourboire à zéro quand il n\'est pas fourni', function () {
@@ -194,6 +219,7 @@ it('laisse le pourboire à zéro quand il n\'est pas fourni', function () {
     postJson("/api/commandes-client/{$commande->id}/paiements", [
         'mode_de_paiement_id' => $mode->id,
         'montant' => 50,
+        'montant_recu' => 50,
     ])->assertCreated()->assertJsonPath('data.pourboire', '0.00');
 
     expect($ctx->session->totalPourboires())->toBe(0.0);
@@ -238,8 +264,8 @@ it('gère un paiement fractionné : reste_a_payer correct', function () {
     $commande = commandeServieAvecLigne($ctx, $user, 100, 1);
     $mode = ModeDePaiement::factory()->create();
 
-    postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $mode->id, 'montant' => 60])->assertCreated();
-    postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $mode->id, 'montant' => 25])
+    postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $mode->id, 'montant' => 60, 'montant_recu' => 60])->assertCreated();
+    postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $mode->id, 'montant' => 25, 'montant_recu' => 25])
         ->assertCreated()
         ->assertJsonPath('data.id', fn ($id) => $id !== null);
 
@@ -252,7 +278,7 @@ it('câble SessionCaisse::montantEnCaisse() sur les paiements de la session', fu
     $commande = commandeServieAvecLigne($ctx, $user, 80, 1);
     $mode = ModeDePaiement::factory()->create();
 
-    postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $mode->id, 'montant' => 80])->assertCreated();
+    postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $mode->id, 'montant' => 80, 'montant_recu' => 100])->assertCreated();
 
     expect($ctx->session->montantEnCaisse())->toBe(80.0);
 });
@@ -269,7 +295,7 @@ it('sépare l\'argent du tiroir de celui qui n\'y passe pas', function () {
     $especes = ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
     $virement = ModeDePaiement::factory()->horsTiroir()->create(['libelle' => 'Virement']);
 
-    postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $especes->id, 'montant' => 30])->assertCreated();
+    postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $especes->id, 'montant' => 30, 'montant_recu' => 30])->assertCreated();
     postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $virement->id, 'montant' => 70])->assertCreated();
 
     expect($ctx->session->montantEnCaisse())->toBe(30.0)
@@ -336,7 +362,7 @@ it('refuse l\'encaissement s\'il reste à payer (422)', function () {
     $user = actingAsServeur($ctx->site, ['commande_client.encaisser', 'paiement.create', 'session_caisse.utiliser']);
     $commande = commandeServieAvecLigne($ctx, $user, 100, 1);
     $mode = ModeDePaiement::factory()->create();
-    postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $mode->id, 'montant' => 50])->assertCreated();
+    postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $mode->id, 'montant' => 50, 'montant_recu' => 50])->assertCreated();
 
     postJson("/api/commandes-client/{$commande->id}/encaisser")->assertStatus(422);
 });
@@ -346,7 +372,7 @@ it('encaisse une commande soldée : statut encaissee, table à débarrasser', fu
     $user = actingAsServeur($ctx->site, ['commande_client.encaisser', 'paiement.create', 'session_caisse.utiliser']);
     $commande = commandeServieAvecLigne($ctx, $user, 100, 1);
     $mode = ModeDePaiement::factory()->create();
-    postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $mode->id, 'montant' => 100])->assertCreated();
+    postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $mode->id, 'montant' => 100, 'montant_recu' => 100])->assertCreated();
 
     postJson("/api/commandes-client/{$commande->id}/encaisser")
         ->assertOk()
@@ -366,7 +392,7 @@ it('signe la clôture du nom de l\'encaisseur', function () {
     $user = actingAsServeur($ctx->site, ['commande_client.encaisser', 'paiement.create', 'session_caisse.utiliser']);
     $commande = commandeServieAvecLigne($ctx, $user, 100, 1);
     $mode = ModeDePaiement::factory()->create();
-    postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $mode->id, 'montant' => 100])->assertCreated();
+    postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $mode->id, 'montant' => 100, 'montant_recu' => 100])->assertCreated();
 
     expect($commande->fresh()->encaisse_par)->toBeNull();
 

@@ -130,6 +130,37 @@ it('génère l\'addition en PDF', function () {
 });
 
 /**
+ * Sur une quantité multiple, le total de la ligne ne se vérifie pas : le client
+ * voit « 2 × Café  2 000 » sans savoir ce que vaut un café. Le prix unitaire
+ * n'était imprimé que sur la facture A4, que personne ne remet au comptoir.
+ */
+it('imprime le prix unitaire sous une ligne à quantité multiple', function () {
+    // La commande de référence porte 2 cafés à 1 000.
+    $commande = pdfCommandeClient();
+
+    $html = app(PdfService::class)->htmlTicketClient($commande, TypeImpression::Addition);
+
+    expect($html)
+        ->toContain('2 × Café')
+        ->toContain('P.U. 1 000 XOF');
+});
+
+/**
+ * Sur une quantité de 1, le prix unitaire répète le total de la ligne : deux
+ * fois le même chiffre sur 72 mm de large fait douter d'un double comptage.
+ */
+it('tait le prix unitaire sur une ligne à quantité 1', function () {
+    $commande = pdfCommandeClient();
+    $commande->lignes()->update(['quantite' => 1]);
+
+    $html = app(PdfService::class)->htmlTicketClient($commande->fresh('lignes'), TypeImpression::Addition);
+
+    expect($html)
+        ->toContain('1 × Café')
+        ->not->toContain('P.U.');
+});
+
+/**
  * Addition et reçu partagent un gabarit, ce qui rend facile de laisser fuiter
  * l'un dans l'autre. Le ticket présenté AVANT le paiement ne doit rien affirmer
  * sur l'argent : ni ligne de paiement, ni monnaie, ni remerciement pour une
@@ -184,14 +215,53 @@ it('retranche le pourboire de la monnaie annoncée au client', function () {
  * `montant` alimente `montant_theorique` de la session : y inscrire le billet
  * tendu ferait apparaître un manquant chaque soir, égal à la monnaie rendue.
  * Le reçu doit donc lire `montant_recu`, jamais gonfler `montant`.
+ *
+ * Sans billet tendu — une carte — il n'y a ni reçu ni monnaie à annoncer.
  */
-it('n\'annonce aucune monnaie quand le compte est juste', function () {
+it('n\'annonce ni tendu ni monnaie sans billet sur le comptoir', function () {
     $commande = pdfCommandeClient();
     $commande->paiements()->update(['montant' => 1500, 'montant_recu' => null]);
 
     $html = app(PdfService::class)->htmlTicketClient($commande->fresh('paiements'));
 
-    expect($html)->not->toContain('MONNAIE');
+    expect($html)
+        ->not->toContain('MONNAIE')
+        ->not->toContain('<td>Reçu</td>');
+});
+
+/**
+ * Le compte juste EST un geste : le client a posé 1 500 sur une note de 1 500.
+ * Taire le reçu et la monnaie laissait le ticket muet sur ce qu'il venait de
+ * faire, et indiscernable d'un règlement par carte.
+ */
+it('annonce le tendu et une monnaie nulle sur un appoint juste en espèces', function () {
+    $commande = pdfCommandeClient();
+    $commande->paiements()->update(['montant' => 1500, 'montant_recu' => 1500]);
+
+    $html = app(PdfService::class)->htmlTicketClient($commande->fresh('paiements'));
+
+    expect($html)
+        ->toContain('<td>Reçu</td>')
+        ->toContain('MONNAIE')
+        ->toContain('0 XOF');
+});
+
+/**
+ * Un acompte en espèces ne rend rien : la monnaie serait négative. Annoncer
+ * « MONNAIE -1 000 » ferait lire au client un rendu à l'envers, alors que la
+ * ligne « Reste » dit déjà ce qu'il doit encore.
+ */
+it('n\'annonce pas de monnaie négative sur un paiement partiel en espèces', function () {
+    $commande = pdfCommandeClient();
+    // 500 posés sur une note de 1 500 : il reste 1 000 à payer.
+    $commande->paiements()->update(['montant' => 500, 'montant_recu' => 500]);
+
+    $html = app(PdfService::class)->htmlTicketClient($commande->fresh('paiements'));
+
+    expect($html)
+        ->toContain('<td>Reçu</td>')
+        ->not->toContain('MONNAIE')
+        ->toContain('Reste');
 });
 
 /**

@@ -345,6 +345,7 @@ it('court le solde des pourboires à travers les sessions', function () {
             'mode_de_paiement_id' => $mode->id,
             'montant' => 5000,
             'pourboire' => $pourboire,
+            'montant_recu' => 5000 + $pourboire,
         ])->assertCreated();
     }
 
@@ -365,7 +366,7 @@ it('éteint la dette au fil des reversements', function () {
     $mode = ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
     $commande = commandeServieAvecLigne($ctx, $serveur, 5000, 1);
     postJson("/api/commandes-client/{$commande->id}/paiements", [
-        'mode_de_paiement_id' => $mode->id, 'montant' => 5000, 'pourboire' => 1200,
+        'mode_de_paiement_id' => $mode->id, 'montant' => 5000, 'pourboire' => 1200, 'montant_recu' => 6200,
     ])->assertCreated();
 
     $gerant = actingAsVersementUser(['versement.view', 'versement.create']);
@@ -389,7 +390,7 @@ it('ne compte comme reversement que ce qui va au personnel', function () {
     $mode = ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
     $commande = commandeServieAvecLigne($ctx, $serveur, 5000, 1);
     postJson("/api/commandes-client/{$commande->id}/paiements", [
-        'mode_de_paiement_id' => $mode->id, 'montant' => 5000, 'pourboire' => 1000,
+        'mode_de_paiement_id' => $mode->id, 'montant' => 5000, 'pourboire' => 1000, 'montant_recu' => 6000,
     ])->assertCreated();
 
     $gerant = actingAsVersementUser(['versement.view', 'versement.create']);
@@ -431,7 +432,7 @@ it('montre au serveur son propre solde, et rien d\'autre', function () {
     $mode = ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
     $commande = commandeServieAvecLigne($ctx, $serveur, 5000, 1);
     postJson("/api/commandes-client/{$commande->id}/paiements", [
-        'mode_de_paiement_id' => $mode->id, 'montant' => 5000, 'pourboire' => 900,
+        'mode_de_paiement_id' => $mode->id, 'montant' => 5000, 'pourboire' => 900, 'montant_recu' => 5900,
     ])->assertCreated();
 
     getJson('/api/pourboires/mon-solde')
@@ -453,7 +454,7 @@ it('liste au serveur les reversements qu\'il a reçus', function () {
     $mode = ModeDePaiement::factory()->create(['libelle' => 'Espèces']);
     $commande = commandeServieAvecLigne($ctx, $serveur, 5000, 1);
     postJson("/api/commandes-client/{$commande->id}/paiements", [
-        'mode_de_paiement_id' => $mode->id, 'montant' => 5000, 'pourboire' => 900,
+        'mode_de_paiement_id' => $mode->id, 'montant' => 5000, 'pourboire' => 900, 'montant_recu' => 5900,
     ])->assertCreated();
 
     Versement::factory()->auPersonnel($serveur)->create([

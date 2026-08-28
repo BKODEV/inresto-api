@@ -887,6 +887,12 @@ d'accueil n'existe pas encore.
 Note de 7 500, le client pose 10 000 et laisse 1 000 : `montant` 7 500,
 `pourboire` 1 000, `montant_recu` 10 000, **monnaie rendue 1 500**.
 
+`montant_recu` est **obligatoire dès que le mode alimente le tiroir**
+(`compte_en_caisse`), appoint juste compris. Sans lui, la monnaie rendue ne se
+déduit pas : le reçu retombait sur le montant encaissé et affirmait un appoint
+que personne n'avait constaté. Hors tiroir (carte, virement), aucun billet n'est
+tendu — le champ reste vide plutôt que d'inventer un chiffre.
+
 ### Deux exigences contradictoires en apparence
 
 1. **Le pourboire DOIT entrer dans le théorique du tiroir.** Il y est
