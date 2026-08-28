@@ -668,6 +668,107 @@ l'envoi en cuisine. C'est cohérent avec le gardien unique du stock
 > matière n'est pas réellement consommée. Déstocker à la commande surévaluerait
 > la consommation en cas d'annulation avant production.
 
+### « Prêt » et « servi » sont deux gestes, un seul déstocke
+
+Une ligne porte désormais trois horodatages : `envoyee_le` (partie en cuisine),
+`prete_le` (annoncée au pass) et `servie_le` (emportée en salle). `servie_le`
+portait auparavant les deux derniers faits à la fois, ce qui rendait le temps de
+production inmesurable : le chrono du KDS comptait aussi l'attente sous la lampe,
+qui n'est pas de la responsabilité de la cuisine. Séparés, les deux durées se
+lisent — `envoyee_le → prete_le` est le temps du chef, `prete_le → servie_le`
+celui de la salle.
+
+**Le déstockage reste sur `servie_le`, et lui seul.** La raison n'est pas
+comptable mais opérationnelle :
+
+> **« Prêt » est un signal de cuisine, donc RÉVERSIBLE** — on dévalide un plat
+> annoncé trop tôt (`annulerPret()`). **« Servi » est irréversible.** Accrocher
+> les mouvements de stock à l'annonce les ferait battre au rythme des
+> corrections du pass. Le stock ne s'accroche qu'à l'irréversible.
+
+Corollaire : `AnnulationService` continue de tester `estServie()` pour arbitrer
+entre `remise_en_stock` et `perte`. Déstocker au prêt l'aurait forcé à basculer
+sur `estPrete()`, et un plat annoncé puis annulé serait devenu une perte alors
+que rien n'a quitté la cuisine.
+
+**L'annonce est facultative.** Servir une ligne jamais annoncée reste permis et
+horodate les deux au même instant : une maison qui n'utilise pas le pass garde
+exactement le comportement d'avant, sans laisser `prete_le` vide sur toute sa
+production.
+
+**Pas de statut de note « prête ».** La préparation est partiellement prête par
+nature (deux lignes annoncées, trois en cuisson) ; un statut au niveau de la note
+ne sait pas l'exprimer. Le cycle de vie reste sur la ligne, et
+`StatutCommandeClient` ne bouge pas.
+
+### La granularité est la LIGNE, jamais le ticket
+
+Annoncer comme servir acceptent une liste de lignes, et les écrans s'en servent :
+on touche un plat pour l'annoncer ou l'emporter seul, le bouton du bas prend
+l'ensemble. Ce n'est pas un confort.
+
+En cuisine, une équipe tient les entrées et une autre les plats, alors qu'un même
+ticket porte les deux : n'annoncer que le ticket entier ferait attendre les
+entrées jusqu'à ce que les plats sortent.
+
+Au pass, c'est une question d'exactitude du stock. Servir déstocke : le runner
+qui n'emporte que les entrées d'une note dont les plats attendent encore sous la
+lampe déchargerait des plats jamais sortis de cuisine, et la dérive
+n'apparaîtrait qu'à l'inventaire.
+
+Les deux files portent la **catégorie du produit** sur chaque ligne. Le système
+ne sait pas ce qu'est une « entrée » — les catégories sont saisies par
+l'établissement, il ne peut donc pas trier à la place de la cuisine. Il lui donne
+de quoi lire : une puce pour repérer ses plats dans un ticket mêlé.
+
+### Postes de production : la brigade n'est pas la carte
+
+`categories_produit` est une taxonomie **commerciale** — sa colonne `ordre`
+range les sections d'une carte pour le client. La brigade est une taxonomie de
+**production** : qui cuit quoi. Les confondre casse sur deux points : une carte
+porte quinze catégories quand un pass en compte trois, et « Cocktails » et
+« Softs » sont deux sections de carte pour un seul bar.
+
+D'où `postes_cuisine`, rattaché au **point de vente** (un rooftop et un
+restaurant n'ont pas le même pass), et un **pivot** `categorie_poste_cuisine`
+plutôt qu'une clé étrangère sur la catégorie : celle-ci est une définition
+partagée, sans `site_id`, et ne peut pas porter une décision d'exploitation
+locale. Le pivot rend d'ailleurs service — la même catégorie « Cocktails » peut
+relever du bar au restaurant et du chaud au rooftop.
+
+Le système **n'apprend jamais ce qu'est une entrée** : les catégories sont
+saisies par l'établissement, il ne peut donc pas trier à sa place. Il lui fait
+déclarer ses postes une fois, et y accrocher ses propres catégories.
+
+#### La règle de sûreté
+
+> Un plat dont la catégorie n'est rattachée à **aucun** poste — ou un produit
+> sans catégorie — reste visible de **TOUS** les écrans.
+
+Une configuration incomplète doit dégrader vers « tout le monde le voit », jamais
+vers « personne ne le voit ». Un plat invisible, c'est une table qu'on ne sert
+jamais, et l'erreur ne se découvre qu'au moment où le client réclame. Même
+raison pour un poste inconnu ou appartenant à un autre pass : on ne filtre pas,
+plutôt que de renvoyer une file vide qui se lirait « service terminé ».
+
+Corollaire : un établissement qui ne déclare **aucun** poste retrouve exactement
+l'écran d'avant, sans rien paramétrer. Le filtre ne coûte rien à qui n'en veut
+pas.
+
+### Deux files, deux métiers
+
+- **KDS** (`GET /api/kds/{pdv}`) — ce qui reste à produire : envoyé, pas encore
+  annoncé. Groupé **par tour**, la cuisine produit ticket par ticket.
+- **Pass** (`GET /api/pass/{pdv}`) — ce qui attend d'être emporté : annoncé, pas
+  encore servi. Groupé **par note**, l'unité de travail du runner étant un voyage
+  vers une table : deux tours prêts pour la table 12 font un seul déplacement.
+
+Annoncer est gouverné par `commande_client.marquer_pret`, et non par
+`commande_client.update` comme le service. C'est tout l'intérêt de la séparation :
+le rôle `chef-cuisine` portait `update` faute de mieux — ce qui lui ouvrait au
+passage la modification et le service des notes de salle — et ne porte plus que
+la lecture et l'annonce. **La cuisine annonce, la salle emporte.**
+
 ### Ce qui est déchargé
 
 Pour chaque ligne de commande, on lit la **fiche technique active** du produit

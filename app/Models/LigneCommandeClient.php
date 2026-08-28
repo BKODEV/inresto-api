@@ -40,6 +40,7 @@ class LigneCommandeClient extends Model
         'prix_unitaire' => 'decimal:2',
         'statut' => Statut::class,
         'envoyee_le' => 'datetime',
+        'prete_le' => 'datetime',
         'servie_le' => 'datetime',
     ];
 
@@ -70,6 +71,19 @@ class LigneCommandeClient extends Model
     public function estEnvoyee(): bool
     {
         return $this->envoyee_le !== null;
+    }
+
+    /**
+     * Annoncée prête au pass par la cuisine, pas encore emportée.
+     *
+     * Signal de cuisine, donc RÉVERSIBLE : un plat annoncé trop tôt se dévalide.
+     * C'est pour cela qu'aucun mouvement de stock n'y est accroché — ils
+     * battraient au rythme des corrections du pass. Le stock ne bouge qu'au
+     * service, voir {@see estServie()}.
+     */
+    public function estPrete(): bool
+    {
+        return $this->prete_le !== null;
     }
 
     /** Servie et déstockée. Empêche un second service de redéstocker. */

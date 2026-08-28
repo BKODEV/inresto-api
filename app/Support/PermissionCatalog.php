@@ -70,6 +70,8 @@ final class PermissionCatalog
                 'session_caisse.utiliser' => 'Utiliser une session de caisse',
                 ...self::crud('commande_client', 'les commandes client'),
                 'commande_client.encaisser' => 'Encaisser une commande client',
+                'commande_client.marquer_pret' => 'Annoncer un plat prêt au pass',
+                ...self::crud('poste_cuisine', 'les postes de production'),
                 'session_caisse.forcer_fermeture' => 'Fermer une caisse sans que tout soit compté',
                 'versement.view' => 'Consulter les versements de caisse',
                 'versement.create' => 'Sortir de l\'argent du tiroir (coffre, banque, direction)',

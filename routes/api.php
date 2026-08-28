@@ -22,6 +22,7 @@ use App\Http\Controllers\Api\Parametres\CarteController;
 use App\Http\Controllers\Api\Parametres\CategorieMatierePremireController;
 use App\Http\Controllers\Api\Parametres\CategorieProduitController;
 use App\Http\Controllers\Api\Parametres\ModeDePaiementController;
+use App\Http\Controllers\Api\Parametres\PosteCuisineController;
 use App\Http\Controllers\Api\Parametres\UniteDeMesureController;
 use App\Http\Controllers\Api\PasswordResetController;
 use App\Http\Controllers\Api\PdfController;
@@ -225,12 +226,22 @@ Route::middleware('auth:sanctum')->group(function () {
         ->name('commandes-client.lignes.store');
     Route::post('commandes-client/{commande}/envoyer-en-cuisine', [CommandeClientController::class, 'envoyerEnCuisine'])
         ->name('commandes-client.envoyer-en-cuisine');
+    // Annonce au pass : gouvernée par `commande_client.marquer_pret`, et non par
+    // `update` comme le service. C'est ce qui permet un rôle cuisine qui annonce
+    // sans pouvoir modifier ni servir les notes de salle.
+    Route::post('commandes-client/{commande}/marquer-pret', [CommandeClientController::class, 'marquerPret'])
+        ->name('commandes-client.marquer-pret');
+    Route::post('commandes-client/{commande}/annuler-pret', [CommandeClientController::class, 'annulerPret'])
+        ->name('commandes-client.annuler-pret');
     Route::post('commandes-client/{commande}/servir', [CommandeClientController::class, 'servir'])
         ->name('commandes-client.servir');
     Route::post('commandes-client/{commande}/encaisser', [CommandeClientController::class, 'encaisser'])
         ->name('commandes-client.encaisser');
     Route::get('kds/{point_de_vente}', [CommandeClientController::class, 'kds'])
         ->name('kds.index');
+    // Le pendant salle du KDS : ce qui est prêt et attend d'être emporté.
+    Route::get('pass/{point_de_vente}', [CommandeClientController::class, 'pass'])
+        ->name('pass.index');
 
     // Module Salle — Lot C-2 : paiements, remises, annulations.
     Route::post('commandes-client/{commande}/paiements', [PaiementController::class, 'store'])
@@ -276,6 +287,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('caisses', CaisseController::class)
             ->parameters(['caisses' => 'caisse']);
         Route::apiResource('cartes', CarteController::class);
+        // Postes de production (« Entrées froides », « Chaud », « Bar »…) et
+        // les catégories de carte qu'ils prennent en charge.
+        Route::apiResource('postes-cuisine', PosteCuisineController::class)
+            ->parameters(['postes-cuisine' => 'poste_cuisine']);
     });
 
     // Module Reporting — lecture seule (agrégations JSON pour le front).

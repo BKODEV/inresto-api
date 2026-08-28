@@ -42,6 +42,17 @@ class CommandeClientPolicy
         return $user->can('commande_client.delete');
     }
 
+    /**
+     * Annoncer un plat prêt au pass, et dévalider l'annonce.
+     *
+     * Volontairement distincte d'`update` : c'est elle qui permet un rôle cuisine
+     * qui annonce sans pouvoir toucher aux notes, ni servir, ni encaisser.
+     */
+    public function marquerPret(User $user, CommandeClient $_commande): bool
+    {
+        return $user->can('commande_client.marquer_pret');
+    }
+
     public function encaisser(User $user, CommandeClient $_commande): bool
     {
         return $user->can('commande_client.encaisser');

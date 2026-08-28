@@ -184,6 +184,89 @@ class CommandeClientService
     }
 
     /**
+     * La cuisine annonce au pass : les lignes sont prêtes, pas encore emportées.
+     *
+     * `servie_le` portait ces deux faits à la fois. Ils ne sont ni au même
+     * moment ni du même métier — la cuisine annonce, la salle emporte — et les
+     * confondre rendait le temps de production inmesurable : le chrono comptait
+     * aussi l'attente sous la lampe, qui n'est pas de la responsabilité du chef.
+     *
+     * AUCUN mouvement de stock ici, volontairement. L'annonce est un signal de
+     * cuisine, donc réversible ({@see annulerPret()}) ; y accrocher le stock le
+     * ferait battre au rythme des corrections du pass. Le déstockage reste sur
+     * l'irréversible, c'est-à-dire {@see servir()}.
+     *
+     * `$ligneIds` restreint l'annonce à un ticket précis ; vide, toute la
+     * production en cours de la note est annoncée.
+     *
+     * @throws CommandeClientException
+     */
+    public function marquerPret(CommandeClient $commande, array $ligneIds = []): CommandeClient
+    {
+        $this->assertNoteModifiable($commande);
+
+        return DB::transaction(function () use ($commande, $ligneIds): CommandeClient {
+            $lignes = $commande->lignes()
+                ->where('statut', Statut::Actif->value)
+                ->whereNotNull('envoyee_le')
+                ->whereNull('prete_le')
+                ->whereNull('servie_le')
+                ->when($ligneIds !== [], fn ($query) => $query->whereIn('id', $ligneIds))
+                ->get();
+
+            if ($lignes->isEmpty()) {
+                throw CommandeClientException::annonceSansLigne($commande->id);
+            }
+
+            $preteLe = now();
+            foreach ($lignes as $ligne) {
+                $ligne->prete_le = $preteLe;
+                $ligne->save();
+            }
+
+            // Pas de rafraichirStatut() : rien n'a été servi. La note reste
+            // « envoyée en cuisine », et c'est exact — le client n'a toujours
+            // rien devant lui. La préparation est partiellement prête par
+            // nature, un statut de note ne saurait pas l'exprimer.
+            return $commande->load(['table', 'sessionCaisse', 'lignes.produit']);
+        });
+    }
+
+    /**
+     * Dévalide une annonce faite trop tôt : la ligne retourne en production.
+     *
+     * C'est la contrepartie qui autorise à ne rien déstocker au prêt. Une ligne
+     * servie est hors d'atteinte — elle est partie en salle et le stock a bougé
+     * avec elle ; la reprendre exige une annulation motivée.
+     *
+     * @throws CommandeClientException
+     */
+    public function annulerPret(CommandeClient $commande, array $ligneIds = []): CommandeClient
+    {
+        $this->assertNoteModifiable($commande);
+
+        return DB::transaction(function () use ($commande, $ligneIds): CommandeClient {
+            $lignes = $commande->lignes()
+                ->where('statut', Statut::Actif->value)
+                ->whereNotNull('prete_le')
+                ->whereNull('servie_le')
+                ->when($ligneIds !== [], fn ($query) => $query->whereIn('id', $ligneIds))
+                ->get();
+
+            if ($lignes->isEmpty()) {
+                throw CommandeClientException::devalidationSansLigne($commande->id);
+            }
+
+            foreach ($lignes as $ligne) {
+                $ligne->prete_le = null;
+                $ligne->save();
+            }
+
+            return $commande->load(['table', 'sessionCaisse', 'lignes.produit']);
+        });
+    }
+
+    /**
      * Marque servies les lignes parties en cuisine et pas encore servies, AVEC
      * déstockage atomique.
      *
@@ -226,6 +309,14 @@ class CommandeClientService
             $servieLe = now();
             foreach ($lignes as $ligne) {
                 $this->destockerLigne($ligne, $commande->id, $siteId, $userId);
+                // L'annonce au pass est FACULTATIVE : un service sans elle reste
+                // permis, et l'horodate au même instant. Sans ce rattrapage, une
+                // maison qui n'annonce pas laisserait `prete_le` vide sur toute
+                // sa production — et le temps de cuisine deviendrait illisible
+                // là où on cherche justement à le mesurer.
+                if ($ligne->prete_le === null) {
+                    $ligne->prete_le = $servieLe;
+                }
                 $ligne->servie_le = $servieLe;
                 $ligne->save();
             }

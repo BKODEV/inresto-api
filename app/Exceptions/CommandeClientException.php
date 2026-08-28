@@ -34,6 +34,20 @@ class CommandeClientException extends RuntimeException
         return new self("Aucune ligne en attente de service sur la note (id: {$commandeId}).", 409);
     }
 
+    public static function annonceSansLigne(int $commandeId): self
+    {
+        return new self("Aucune ligne en production à annoncer prête sur la note (id: {$commandeId}).", 409);
+    }
+
+    /**
+     * Dévalider ne rattrape que ce qui est encore au pass : une ligne servie est
+     * partie en salle, et le stock a bougé avec elle.
+     */
+    public static function devalidationSansLigne(int $commandeId): self
+    {
+        return new self("Aucune ligne prête et non servie à dévalider sur la note (id: {$commandeId}).", 409);
+    }
+
     public static function tableArchivee(int $tableId): self
     {
         return new self("La table (id: {$tableId}) est archivée : réactivez-la pour y ouvrir une commande.", 409);

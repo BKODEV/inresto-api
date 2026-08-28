@@ -25,6 +25,9 @@ class LigneCommandeClientResource extends JsonResource
             'statut' => $this->statut->value,
             // Horodatage du tour : les lignes parties ensemble le partagent.
             'envoyee_le' => $this->envoyee_le?->toIso8601String(),
+            // Annoncée prête au pass. Sépare le temps de la cuisine
+            // (envoyee → prete) de l'attente sous la lampe (prete → servie).
+            'prete_le' => $this->prete_le?->toIso8601String(),
             'servie_le' => $this->servie_le?->toIso8601String(),
             // Jamais partie en cuisine : se retire sans motif d'annulation.
             'retirable_sans_motif' => $this->estRetirableSansMotif(),

@@ -8,6 +8,7 @@ use App\Models\Annulation;
 use App\Models\Caisse;
 use App\Models\Carte;
 use App\Models\CarteProduit;
+use App\Models\CategorieProduit;
 use App\Models\CommandeClient;
 use App\Models\FicheTechnique;
 use App\Models\LigneCommandeClient;
@@ -19,6 +20,7 @@ use App\Models\ModeDePaiement;
 use App\Models\MouvementStock;
 use App\Models\Paiement;
 use App\Models\PointDeVente;
+use App\Models\PosteCuisine;
 use App\Models\Produit;
 use App\Models\SessionCaisse;
 use App\Models\Site;
@@ -960,4 +962,386 @@ it('refuse le KDS d\'un point de vente hors périmètre', function () {
     $autrePdv = PointDeVente::factory()->create(['site_id' => $autreSite->id]);
 
     getJson("/api/kds/{$autrePdv->id}")->assertForbidden();
+});
+
+// ───────────────────────── annonce au pass (prêt ≠ servi) ─────────────────────────
+
+/**
+ * @param  string[]  $permissions
+ */
+function actingAsCuisine(Site $site, array $permissions = ['commande_client.view', 'commande_client.marquer_pret']): User
+{
+    return actingAsServeur($site, $permissions);
+}
+
+/**
+ * Le partage qui justifie toute la séparation : la cuisine annonce, le stock ne
+ * bouge pas. Y accrocher les mouvements les ferait battre au rythme des
+ * dévalidations du pass.
+ */
+it('marquer prêt : horodate l\'annonce sans servir ni déstocker', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['commande_client.create', 'commande_client.update', 'commande_client.view', 'commande_client.marquer_pret', 'session_caisse.utiliser']);
+    $produit = produitSurCarte($ctx);
+    $matiere = MatierePremiere::factory()->create();
+    $fiche = FicheTechnique::factory()->create(['produit_id' => $produit->id]);
+    LigneFicheTechnique::factory()->create([
+        'fiche_technique_id' => $fiche->id,
+        'matiere_premiere_id' => $matiere->id,
+        'quantite' => 1,
+    ]);
+    $commande = commandeSur($ctx, $user);
+
+    postJson("/api/commandes-client/{$commande->id}/envoyer-en-cuisine", [
+        'lignes' => [['produit_id' => $produit->id, 'quantite' => 1]],
+    ])->assertOk();
+
+    postJson("/api/commandes-client/{$commande->id}/marquer-pret")->assertOk();
+
+    $ligne = LigneCommandeClient::where('commande_client_id', $commande->id)->first();
+
+    expect($ligne->prete_le)->not->toBeNull()
+        ->and($ligne->servie_le)->toBeNull()
+        // Le stock ne bouge que sur l'irréversible.
+        ->and(MouvementStock::where('matiere_premiere_id', $matiere->id)->count())->toBe(0)
+        // La note reste en production : le client n'a rien devant lui.
+        ->and($commande->fresh()->statut->value)->toBe('envoyee_en_cuisine');
+});
+
+it('marquer prêt : n\'annonce que le tour visé', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['commande_client.create', 'commande_client.update', 'commande_client.view', 'commande_client.marquer_pret', 'session_caisse.utiliser']);
+    $produit = produitSurCarte($ctx);
+    $commande = commandeSur($ctx, $user);
+
+    postJson("/api/commandes-client/{$commande->id}/envoyer-en-cuisine", [
+        'lignes' => [['produit_id' => $produit->id, 'quantite' => 1]],
+    ])->assertOk();
+    $premier = LigneCommandeClient::where('commande_client_id', $commande->id)->first();
+
+    test()->travel(2)->seconds();
+
+    postJson("/api/commandes-client/{$commande->id}/envoyer-en-cuisine", [
+        'lignes' => [['produit_id' => $produit->id, 'quantite' => 1]],
+    ])->assertOk();
+    $second = LigneCommandeClient::where('commande_client_id', $commande->id)
+        ->where('id', '!=', $premier->id)
+        ->first();
+
+    postJson("/api/commandes-client/{$commande->id}/marquer-pret", ['lignes' => [$premier->id]])
+        ->assertOk();
+
+    expect($premier->fresh()->prete_le)->not->toBeNull()
+        ->and($second->fresh()->prete_le)->toBeNull();
+});
+
+it('refuse d\'annoncer quand rien n\'est en production (409)', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['commande_client.view', 'commande_client.marquer_pret', 'session_caisse.utiliser']);
+    $produit = produitSurCarte($ctx);
+    $commande = commandeSur($ctx, $user);
+    LigneCommandeClient::factory()->create(['commande_client_id' => $commande->id, 'produit_id' => $produit->id]);
+
+    postJson("/api/commandes-client/{$commande->id}/marquer-pret")->assertStatus(409);
+});
+
+/**
+ * La contrepartie qui autorise à ne rien déstocker au prêt : l'annonce se défait.
+ */
+it('annuler le prêt : la ligne retourne en production', function () {
+    $ctx = salleContext();
+    $user = actingAsCuisine($ctx->site);
+    $produit = produitSurCarte($ctx);
+    $commande = commandeSur($ctx, $user, 'envoyee_en_cuisine');
+    $ligne = LigneCommandeClient::factory()->prete()->create([
+        'commande_client_id' => $commande->id,
+        'produit_id' => $produit->id,
+    ]);
+
+    postJson("/api/commandes-client/{$commande->id}/annuler-pret")->assertOk();
+
+    expect($ligne->fresh()->prete_le)->toBeNull()
+        ->and($ligne->fresh()->envoyee_le)->not->toBeNull();
+});
+
+/**
+ * Une ligne servie est partie en salle et le stock a bougé avec elle : la
+ * reprendre exige une annulation motivée, pas une dévalidation.
+ */
+it('refuse de dévalider une ligne déjà servie (409)', function () {
+    $ctx = salleContext();
+    $user = actingAsCuisine($ctx->site);
+    $produit = produitSurCarte($ctx);
+    $commande = commandeSur($ctx, $user, 'servie');
+    LigneCommandeClient::factory()->servie()->create([
+        'commande_client_id' => $commande->id,
+        'produit_id' => $produit->id,
+    ]);
+
+    postJson("/api/commandes-client/{$commande->id}/annuler-pret")->assertStatus(409);
+});
+
+/**
+ * L'annonce est FACULTATIVE : une maison qui n'utilise pas le pass garde le
+ * comportement d'avant, et ses durées de production restent lisibles.
+ */
+it('servir sans annonce préalable horodate aussi le prêt', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site);
+    $produit = produitSurCarte($ctx);
+    $commande = commandeSur($ctx, $user);
+
+    postJson("/api/commandes-client/{$commande->id}/envoyer-en-cuisine", [
+        'lignes' => [['produit_id' => $produit->id, 'quantite' => 1]],
+    ])->assertOk();
+    postJson("/api/commandes-client/{$commande->id}/servir")->assertOk();
+
+    $ligne = LigneCommandeClient::where('commande_client_id', $commande->id)->first();
+
+    expect($ligne->prete_le)->not->toBeNull()
+        ->and($ligne->servie_le)->not->toBeNull()
+        ->and($ligne->prete_le->eq($ligne->servie_le))->toBeTrue();
+});
+
+it('KDS : une ligne annoncée sort de la file cuisine', function () {
+    $ctx = salleContext();
+    $user = actingAsCuisine($ctx->site);
+    $produit = produitSurCarte($ctx);
+    $commande = commandeSur($ctx, $user, 'envoyee_en_cuisine');
+    LigneCommandeClient::factory()->envoyee()->create(['commande_client_id' => $commande->id, 'produit_id' => $produit->id]);
+    LigneCommandeClient::factory()->prete()->create(['commande_client_id' => $commande->id, 'produit_id' => $produit->id]);
+
+    getJson("/api/kds/{$ctx->pdv->id}")
+        ->assertOk()
+        ->assertJsonCount(1, 'data.tours')
+        // Seule la ligne encore en cuisson : l'annoncée attend la salle.
+        ->assertJsonCount(1, 'data.tours.0.lignes');
+});
+
+/**
+ * L'unité de travail du runner est un voyage vers une table : deux tours prêts
+ * pour la même note se prennent en un seul déplacement.
+ */
+it('pass : ne remonte que le prêt non servi, groupé par note', function () {
+    $ctx = salleContext();
+    $user = actingAsCuisine($ctx->site);
+    $produit = produitSurCarte($ctx);
+
+    $commande = commandeSur($ctx, $user, 'envoyee_en_cuisine');
+    LigneCommandeClient::factory()->prete()->create(['commande_client_id' => $commande->id, 'produit_id' => $produit->id]);
+    LigneCommandeClient::factory()->prete()->create(['commande_client_id' => $commande->id, 'produit_id' => $produit->id]);
+    // Encore en cuisson : ce n'est pas au pass.
+    LigneCommandeClient::factory()->envoyee()->create(['commande_client_id' => $commande->id, 'produit_id' => $produit->id]);
+    // Déjà emportée.
+    LigneCommandeClient::factory()->servie()->create(['commande_client_id' => $commande->id, 'produit_id' => $produit->id]);
+
+    // Prête sur un AUTRE point de vente.
+    $autrePdv = PointDeVente::factory()->create(['site_id' => $ctx->site->id]);
+    $autreTable = TableSalle::factory()->create(['point_de_vente_id' => $autrePdv->id]);
+    $ailleurs = CommandeClient::factory()->envoyeeEnCuisine()->create([
+        'table_id' => $autreTable->id,
+        'session_caisse_id' => $ctx->session->id,
+        'user_id' => $user->id,
+    ]);
+    LigneCommandeClient::factory()->prete()->create(['commande_client_id' => $ailleurs->id, 'produit_id' => $produit->id]);
+
+    getJson("/api/pass/{$ctx->pdv->id}")
+        ->assertOk()
+        ->assertJsonCount(1, 'data.services')
+        ->assertJsonPath('data.services.0.commande_id', $commande->id)
+        ->assertJsonCount(2, 'data.services.0.lignes');
+});
+
+it('refuse le pass d\'un point de vente hors périmètre', function () {
+    $ctx = salleContext();
+    actingAsCuisine($ctx->site);
+
+    $autreSite = Site::factory()->create();
+    $autrePdv = PointDeVente::factory()->create(['site_id' => $autreSite->id]);
+
+    getJson("/api/pass/{$autrePdv->id}")->assertForbidden();
+});
+
+/**
+ * Le gain de la permission dédiée : la cuisine annonce sans pouvoir servir les
+ * notes de salle — ce que `commande_client.update` lui ouvrait auparavant.
+ */
+it('la cuisine annonce mais ne sert pas', function () {
+    $ctx = salleContext();
+    $user = actingAsCuisine($ctx->site);
+    $produit = produitSurCarte($ctx);
+    $commande = commandeSur($ctx, $user, 'envoyee_en_cuisine');
+    LigneCommandeClient::factory()->envoyee()->create(['commande_client_id' => $commande->id, 'produit_id' => $produit->id]);
+
+    postJson("/api/commandes-client/{$commande->id}/marquer-pret")->assertOk();
+    postJson("/api/commandes-client/{$commande->id}/servir")->assertForbidden();
+});
+
+it('refuse d\'annoncer sans la permission dédiée', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site);
+    $produit = produitSurCarte($ctx);
+    $commande = commandeSur($ctx, $user, 'envoyee_en_cuisine');
+    LigneCommandeClient::factory()->envoyee()->create(['commande_client_id' => $commande->id, 'produit_id' => $produit->id]);
+
+    // `commande_client.update` ne suffit plus : annoncer est un geste de cuisine.
+    postJson("/api/commandes-client/{$commande->id}/marquer-pret")->assertForbidden();
+});
+
+/**
+ * La catégorie du produit sur la ligne du ticket.
+ *
+ * Le système ne sait pas ce qu'est une « entrée » — les catégories sont saisies
+ * par l'établissement. Il ne peut donc pas trier pour la cuisine, mais il peut
+ * lui donner de quoi lire : une puce sur chaque ligne. C'est ce qui permet à
+ * l'équipe des entrées de repérer ses plats dans un ticket mêlé, en attendant
+ * de vrais postes de production.
+ */
+it('KDS et pass portent la catégorie du produit sur chaque ligne', function () {
+    $ctx = salleContext();
+    $user = actingAsCuisine($ctx->site);
+    $categorie = CategorieProduit::factory()->create(['libelle' => 'Entrées']);
+    $produit = produitSurCarte($ctx);
+    $produit->categorie_id = $categorie->id;
+    $produit->save();
+
+    $commande = commandeSur($ctx, $user, 'envoyee_en_cuisine');
+    LigneCommandeClient::factory()->envoyee()->create(['commande_client_id' => $commande->id, 'produit_id' => $produit->id]);
+    LigneCommandeClient::factory()->prete()->create(['commande_client_id' => $commande->id, 'produit_id' => $produit->id]);
+
+    getJson("/api/kds/{$ctx->pdv->id}")
+        ->assertOk()
+        ->assertJsonPath('data.tours.0.lignes.0.produit.categorie.libelle', 'Entrées');
+
+    getJson("/api/pass/{$ctx->pdv->id}")
+        ->assertOk()
+        ->assertJsonPath('data.services.0.lignes.0.produit.categorie.libelle', 'Entrées');
+});
+
+// ───────────────────────── postes de production (chaud / froid) ─────────────────────────
+
+/**
+ * Le filtre par poste : l'équipe du chaud ne voit pas les entrées.
+ */
+it('KDS : restreint la file au poste demandé', function () {
+    $ctx = salleContext();
+    $user = actingAsCuisine($ctx->site);
+
+    $catEntrees = CategorieProduit::factory()->create(['libelle' => 'Entrées']);
+    $catPlats = CategorieProduit::factory()->create(['libelle' => 'Plats']);
+
+    $entree = produitSurCarte($ctx);
+    $entree->update(['categorie_id' => $catEntrees->id]);
+    $plat = produitSurCarte($ctx);
+    $plat->update(['categorie_id' => $catPlats->id]);
+
+    $posteFroid = PosteCuisine::factory()->create(['point_de_vente_id' => $ctx->pdv->id, 'libelle' => 'Froid']);
+    $posteFroid->categories()->sync([$catEntrees->id]);
+    $posteChaud = PosteCuisine::factory()->create(['point_de_vente_id' => $ctx->pdv->id, 'libelle' => 'Chaud']);
+    $posteChaud->categories()->sync([$catPlats->id]);
+
+    $commande = commandeSur($ctx, $user, 'envoyee_en_cuisine');
+    LigneCommandeClient::factory()->envoyee()->create(['commande_client_id' => $commande->id, 'produit_id' => $entree->id]);
+    LigneCommandeClient::factory()->envoyee()->create(['commande_client_id' => $commande->id, 'produit_id' => $plat->id]);
+
+    getJson("/api/kds/{$ctx->pdv->id}?poste_cuisine_id={$posteFroid->id}")
+        ->assertOk()
+        ->assertJsonCount(1, 'data.tours.0.lignes')
+        ->assertJsonPath('data.tours.0.lignes.0.produit_id', $entree->id);
+
+    // Sans poste : toute la file, comme avant.
+    getJson("/api/kds/{$ctx->pdv->id}")
+        ->assertOk()
+        ->assertJsonCount(2, 'data.tours.0.lignes');
+});
+
+/**
+ * LA règle de sûreté. Une catégorie rattachée à aucun poste — ou un produit
+ * sans catégorie — reste visible de TOUS les écrans.
+ *
+ * Une configuration incomplète doit dégrader vers « tout le monde le voit »,
+ * jamais vers « personne ne le voit » : un plat invisible, c'est une table
+ * qu'on ne sert jamais, et l'erreur ne se découvre qu'au moment où le client
+ * réclame.
+ */
+it('KDS : un plat non affecté reste visible de tous les postes', function () {
+    $ctx = salleContext();
+    $user = actingAsCuisine($ctx->site);
+
+    $catEntrees = CategorieProduit::factory()->create();
+    $catOrpheline = CategorieProduit::factory()->create();
+
+    $entree = produitSurCarte($ctx);
+    $entree->update(['categorie_id' => $catEntrees->id]);
+    $orphelin = produitSurCarte($ctx);
+    $orphelin->update(['categorie_id' => $catOrpheline->id]);
+    $sansCategorie = produitSurCarte($ctx);
+    $sansCategorie->update(['categorie_id' => null]);
+
+    $posteFroid = PosteCuisine::factory()->create(['point_de_vente_id' => $ctx->pdv->id]);
+    $posteFroid->categories()->sync([$catEntrees->id]);
+
+    $commande = commandeSur($ctx, $user, 'envoyee_en_cuisine');
+    foreach ([$entree, $orphelin, $sansCategorie] as $produit) {
+        LigneCommandeClient::factory()->envoyee()->create([
+            'commande_client_id' => $commande->id,
+            'produit_id' => $produit->id,
+        ]);
+    }
+
+    // Les trois : celui du poste, l'orphelin, et le sans-catégorie.
+    getJson("/api/kds/{$ctx->pdv->id}?poste_cuisine_id={$posteFroid->id}")
+        ->assertOk()
+        ->assertJsonCount(3, 'data.tours.0.lignes');
+});
+
+/**
+ * Un poste inconnu ou appartenant à un autre pass ne doit pas vider la file :
+ * un écran vide se lit « service terminé », et la cuisine s'arrêterait.
+ */
+it('KDS : un poste inconnu ne vide pas la file', function () {
+    $ctx = salleContext();
+    $user = actingAsCuisine($ctx->site);
+    $produit = produitSurCarte($ctx);
+    $commande = commandeSur($ctx, $user, 'envoyee_en_cuisine');
+    LigneCommandeClient::factory()->envoyee()->create(['commande_client_id' => $commande->id, 'produit_id' => $produit->id]);
+
+    $autrePdv = PointDeVente::factory()->create(['site_id' => $ctx->site->id]);
+    $posteAilleurs = PosteCuisine::factory()->create(['point_de_vente_id' => $autrePdv->id]);
+
+    getJson("/api/kds/{$ctx->pdv->id}?poste_cuisine_id={$posteAilleurs->id}")
+        ->assertOk()
+        ->assertJsonCount(1, 'data.tours');
+
+    getJson("/api/kds/{$ctx->pdv->id}?poste_cuisine_id=999999")
+        ->assertOk()
+        ->assertJsonCount(1, 'data.tours');
+});
+
+it('pass : se restreint aussi au poste demandé', function () {
+    $ctx = salleContext();
+    $user = actingAsCuisine($ctx->site);
+
+    $catPlats = CategorieProduit::factory()->create();
+    $plat = produitSurCarte($ctx);
+    $plat->update(['categorie_id' => $catPlats->id]);
+    $autre = produitSurCarte($ctx);
+    $autre->update(['categorie_id' => CategorieProduit::factory()->create()->id]);
+
+    $posteChaud = PosteCuisine::factory()->create(['point_de_vente_id' => $ctx->pdv->id]);
+    $posteChaud->categories()->sync([$catPlats->id]);
+    // Un second poste, pour que la catégorie de l'autre plat soit AFFECTÉE et
+    // tombe donc hors du poste demandé — sans lui, la règle de sûreté la
+    // laisserait passer.
+    $posteFroid = PosteCuisine::factory()->create(['point_de_vente_id' => $ctx->pdv->id]);
+    $posteFroid->categories()->sync([$autre->categorie_id]);
+
+    $commande = commandeSur($ctx, $user, 'envoyee_en_cuisine');
+    LigneCommandeClient::factory()->prete()->create(['commande_client_id' => $commande->id, 'produit_id' => $plat->id]);
+    LigneCommandeClient::factory()->prete()->create(['commande_client_id' => $commande->id, 'produit_id' => $autre->id]);
+
+    getJson("/api/pass/{$ctx->pdv->id}?poste_cuisine_id={$posteChaud->id}")
+        ->assertOk()
+        ->assertJsonCount(1, 'data.services.0.lignes')
+        ->assertJsonPath('data.services.0.lignes.0.produit_id', $plat->id);
 });

@@ -37,11 +37,27 @@ class LigneCommandeClientFactory extends Factory
         return $this->state(['envoyee_le' => now()->subMinutes(5)]);
     }
 
+    /**
+     * Ligne annoncée prête au pass : sortie de la file cuisine, elle attend la
+     * salle. Aucun mouvement de stock ne lui est associé — le déstockage est au
+     * service.
+     */
+    public function prete(): static
+    {
+        return $this->state([
+            'envoyee_le' => now()->subMinutes(8),
+            'prete_le' => now()->subMinutes(3),
+        ]);
+    }
+
     /** Ligne servie et déstockée : un second service ne la reprend pas. */
     public function servie(): static
     {
         return $this->state([
             'envoyee_le' => now()->subMinutes(10),
+            // Une ligne servie a forcément été prête avant : l'omettre ferait
+            // mentir les durées de production calculées sur les fixtures.
+            'prete_le' => now()->subMinutes(4),
             'servie_le' => now()->subMinutes(2),
         ]);
     }

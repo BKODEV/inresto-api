@@ -71,6 +71,8 @@ class RoleSeeder extends Seeder
                     ...$this->crud('session_caisse'), 'session_caisse.utiliser',
                     'session_caisse.forcer_fermeture',
                     ...$this->crud('commande_client'), 'commande_client.encaisser',
+                    'commande_client.marquer_pret',
+                    ...$this->crud('poste_cuisine'),
                     'paiement.view', 'paiement.create',
                     'versement.view', 'versement.create',
                     'remise.view', 'remise.create', 'remise.autoriser_au_dela_seuil',
@@ -98,10 +100,19 @@ class RoleSeeder extends Seeder
                     'unite-de-mesure.view',
                     'produit.view',
                     'fournisseur.view', 'catalogue-fournisseur.view', 'commande-fournisseur.view',
-                    // Écran de production (KDS) : la cuisine doit voir les
-                    // commandes envoyées et les marquer servies. Sans ces deux
-                    // permissions, son propre écran lui est inaccessible.
-                    'commande_client.view', 'commande_client.update',
+                    // Écran de production (KDS) : la cuisine voit les commandes
+                    // envoyées et annonce ses plats prêts au pass.
+                    //
+                    // `marquer_pret` et NON `update` : ce dernier lui était donné
+                    // faute de mieux, du temps où « servi » était le seul geste
+                    // disponible — il lui ouvrait au passage la modification et
+                    // le service des notes de salle, qui ne le regardent pas.
+                    // Séparer l'annonce du service permet enfin de le lui
+                    // retirer. La cuisine annonce, la salle emporte.
+                    'commande_client.view', 'commande_client.marquer_pret',
+                    // Organiser sa brigade est le métier du chef, pas une
+                    // question de paramétrage commercial.
+                    ...$this->crud('poste_cuisine'),
                     'reporting.food_cost', 'reporting.stock',
                 ],
             ],
@@ -141,6 +152,8 @@ class RoleSeeder extends Seeder
                     'table.view', 'table.update',
                     'session_caisse.view', 'session_caisse.utiliser',
                     'commande_client.view', 'commande_client.create', 'commande_client.update',
+                    // Lecture seule : de quoi filtrer l'écran du pass par poste.
+                    'poste_cuisine.view',
                     'carte.view', 'produit.view', 'carte_produit.view',
                 ],
             ],
