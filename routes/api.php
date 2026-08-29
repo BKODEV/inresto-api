@@ -22,6 +22,7 @@ use App\Http\Controllers\Api\Parametres\CarteController;
 use App\Http\Controllers\Api\Parametres\CategorieMatierePremireController;
 use App\Http\Controllers\Api\Parametres\CategorieProduitController;
 use App\Http\Controllers\Api\Parametres\ModeDePaiementController;
+use App\Http\Controllers\Api\Parametres\PosteCuisineController;
 use App\Http\Controllers\Api\Parametres\UniteDeMesureController;
 use App\Http\Controllers\Api\PasswordResetController;
 use App\Http\Controllers\Api\PdfController;
@@ -39,6 +40,7 @@ use App\Http\Controllers\Api\Reporting\StockController as ReportingStockControll
 use App\Http\Controllers\Api\Reporting\VentesController as ReportingVentesController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SessionCaisseController;
+use App\Http\Controllers\Api\SessionCuisineController;
 use App\Http\Controllers\Api\SiteController;
 use App\Http\Controllers\Api\SousRecetteController;
 use App\Http\Controllers\Api\StockController;
@@ -225,12 +227,44 @@ Route::middleware('auth:sanctum')->group(function () {
         ->name('commandes-client.lignes.store');
     Route::post('commandes-client/{commande}/envoyer-en-cuisine', [CommandeClientController::class, 'envoyerEnCuisine'])
         ->name('commandes-client.envoyer-en-cuisine');
+    // Annonce au pass : gouvernée par `commande_client.marquer_pret`, et non par
+    // `update` comme le service. C'est ce qui permet un rôle cuisine qui annonce
+    // sans pouvoir modifier ni servir les notes de salle.
+    Route::post('commandes-client/{commande}/marquer-pret', [CommandeClientController::class, 'marquerPret'])
+        ->name('commandes-client.marquer-pret');
+    Route::post('commandes-client/{commande}/annuler-pret', [CommandeClientController::class, 'annulerPret'])
+        ->name('commandes-client.annuler-pret');
     Route::post('commandes-client/{commande}/servir', [CommandeClientController::class, 'servir'])
         ->name('commandes-client.servir');
     Route::post('commandes-client/{commande}/encaisser', [CommandeClientController::class, 'encaisser'])
         ->name('commandes-client.encaisser');
     Route::get('kds/{point_de_vente}', [CommandeClientController::class, 'kds'])
         ->name('kds.index');
+    // Le pendant salle du KDS : ce qui est prêt et attend d'être emporté.
+    Route::get('pass/{point_de_vente}', [CommandeClientController::class, 'pass'])
+        ->name('pass.index');
+
+    // Services de cuisine — le pendant brigade de la session de caisse, et
+    // INDÉPENDANT d'elle : un point de vente porte plusieurs caisses pour une
+    // seule cuisine, et la brigade travaille avant la première ouverture de
+    // caisse comme après la dernière fermeture.
+    Route::get('sessions-cuisine', [SessionCuisineController::class, 'index'])
+        ->name('sessions-cuisine.index');
+    Route::post('sessions-cuisine', [SessionCuisineController::class, 'store'])
+        ->name('sessions-cuisine.store');
+    Route::get('sessions-cuisine/{session_cuisine}', [SessionCuisineController::class, 'show'])
+        ->name('sessions-cuisine.show');
+    Route::post('sessions-cuisine/{session_cuisine}/fermer', [SessionCuisineController::class, 'fermer'])
+        ->name('sessions-cuisine.fermer');
+    // Ce que la brigade a produit : la raison d'être du module.
+    Route::get('sessions-cuisine/{session_cuisine}/production', [SessionCuisineController::class, 'production'])
+        ->name('sessions-cuisine.production');
+    // Qui peut être inscrit à une brigade. Lecture minimale, gouvernée par
+    // `poste_cuisine.view` : composer une équipe relève de l'organisation du
+    // pass, pas de l'administration du personnel — le chef n'a pas
+    // `utilisateur.view` et se retrouvait en 403 sur son propre écran.
+    Route::get('points-de-vente/{point_de_vente}/personnel', [SessionCuisineController::class, 'personnel'])
+        ->name('points-de-vente.personnel');
 
     // Module Salle — Lot C-2 : paiements, remises, annulations.
     Route::post('commandes-client/{commande}/paiements', [PaiementController::class, 'store'])
@@ -245,6 +279,15 @@ Route::middleware('auth:sanctum')->group(function () {
         ->name('commandes-client.annuler');
     Route::delete('commandes-client/{commande}/lignes/{ligne}', [AnnulationController::class, 'annulerLigne'])
         ->name('commandes-client.lignes.annuler');
+
+    // Relecture des remises et des annulations, en lecture seule et paginée.
+    // `remise.view` et `annulation.view` existaient au catalogue, et leurs
+    // policies portaient déjà `viewAny` — sans aucune route pour les consommer :
+    // les accorder à un rôle n'ouvrait rien. Le journal d'activité montre ces
+    // gestes au fil du service ; ces listes répondent à la question de contrôle,
+    // sur une période, avec leurs filtres propres.
+    Route::get('remises', [RemiseController::class, 'index'])->name('remises.index');
+    Route::get('annulations', [AnnulationController::class, 'index'])->name('annulations.index');
 
     // État du stock par site + journal des mouvements (lecture seule, écran
     // opérationnel de cuisine — permission `stock.view`).
@@ -276,6 +319,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('caisses', CaisseController::class)
             ->parameters(['caisses' => 'caisse']);
         Route::apiResource('cartes', CarteController::class);
+        // Postes de production (« Entrées froides », « Chaud », « Bar »…) et
+        // les catégories de carte qu'ils prennent en charge.
+        Route::apiResource('postes-cuisine', PosteCuisineController::class)
+            ->parameters(['postes-cuisine' => 'poste_cuisine']);
     });
 
     // Module Reporting — lecture seule (agrégations JSON pour le front).

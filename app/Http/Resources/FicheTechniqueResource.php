@@ -25,6 +25,17 @@ class FicheTechniqueResource extends JsonResource
             'produit' => new ProduitResource($this->whenLoaded('produit')),
             'lignes_matieres' => LigneFicheTechniqueResource::collection($this->whenLoaded('lignesMatiere')),
             'lignes_sous_recettes' => LigneFicheTechniqueSousRecetteResource::collection($this->whenLoaded('lignesSousRecette')),
+            // Méthodologie : sans elle, un intérimaire tient la liste des
+            // matières sans savoir quoi en faire.
+            'etapes' => EtapeFicheTechniqueResource::collection($this->whenLoaded('etapes')),
+            'materiels' => MaterielFicheTechniqueResource::collection($this->whenLoaded('materiels')),
+            'points_critiques' => PointCritiqueFicheTechniqueResource::collection($this->whenLoaded('pointsCritiques')),
+            // Somme des étapes chiffrées ; null si aucune ne l'est, plutôt qu'un
+            // « 0 min » qui se lirait comme une recette instantanée.
+            'duree_totale_minutes' => $this->whenLoaded(
+                'etapes',
+                fn (): ?int => $this->dureeTotaleMinutes(),
+            ),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
         ];

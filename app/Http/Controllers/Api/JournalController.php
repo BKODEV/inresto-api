@@ -14,7 +14,7 @@ use Illuminate\Support\Carbon;
 
 /**
  * Journal d'activité : frise chronologique des gestes sensibles du service —
- * annulations, remises, paiements, clôtures de note, impressions.
+ * annulations, remises, paiements, clôtures de note, versements, impressions.
  *
  * Strictement en lecture. Rien n'est écrit ici : le journal relit les traces
  * que chaque module produit déjà avec son contexte métier propre.

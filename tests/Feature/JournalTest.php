@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Models\Annulation;
 use App\Models\Caisse;
 use App\Models\CommandeClient;
 use App\Models\ModeDePaiement;
@@ -10,6 +11,7 @@ use App\Models\SessionCaisse;
 use App\Models\Site;
 use App\Models\TableSalle;
 use App\Models\User;
+use App\Models\Versement;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
@@ -193,4 +195,78 @@ it('refuse le journal sans la permission journal.view', function () {
 
 it('refuse le journal sans authentification', function () {
     getJson('/api/journal')->assertUnauthorized();
+});
+
+// ───────────────────────── annulations ─────────────────────────
+
+/**
+ * `sort` est une colonne texte, pas un enum. Le journal la lisait en
+ * `$a->sort?->value` : sur une chaîne, PHP émet un warning et rend null. Le
+ * devenir du stock ne s'affichait donc JAMAIS, alors que c'est précisément le
+ * contexte métier que le journal promet de relayer — une ligne annulée après
+ * service est repartie en stock, ou elle est passée en perte.
+ */
+it('dit le devenir du stock d\'une ligne annulée après service', function () {
+    $ctx = journalContext();
+    $user = actingAsJournalUser($ctx->site);
+    $commande = commandeJournal($ctx, $user);
+
+    Annulation::factory()->create([
+        'annulable_type' => 'commandes_client',
+        'annulable_id' => $commande->id,
+        'user_id' => $user->id,
+        'sort' => 'perte',
+        'date_heure' => now(),
+    ]);
+
+    getJson('/api/journal?type[]=annulation')
+        ->assertOk()
+        ->assertJsonCount(1, 'data.evenements')
+        ->assertJsonPath('data.evenements.0.detail', 'perte');
+});
+
+it('laisse le devenir vide quand rien n\'avait été déstocké', function () {
+    // Une commande annulée avant d'être servie ne rend rien au stock : il n'y a
+    // pas de sort à afficher, et surtout pas un « perte » par défaut.
+    $ctx = journalContext();
+    $user = actingAsJournalUser($ctx->site);
+    $commande = commandeJournal($ctx, $user, 'ouverte');
+
+    Annulation::factory()->create([
+        'annulable_type' => 'commandes_client',
+        'annulable_id' => $commande->id,
+        'user_id' => $user->id,
+        'sort' => null,
+        'date_heure' => now(),
+    ]);
+
+    getJson('/api/journal?type[]=annulation')
+        ->assertOk()
+        ->assertJsonPath('data.evenements.0.detail', null);
+});
+
+// ───────────────────────── versements ─────────────────────────
+
+/**
+ * `versement` est une des six sources assemblées par l'API et remontait déjà
+ * sans filtre. Ce test fige le type comme filtrable : le front s'en sert pour
+ * proposer la bascule « Versements ».
+ */
+it('filtre sur les seules sorties de tiroir', function () {
+    $ctx = journalContext();
+    $user = actingAsJournalUser($ctx->site);
+
+    Versement::factory()->create([
+        'caisse_id' => $ctx->caisse->id,
+        'session_caisse_id' => $ctx->session->id,
+        'user_id' => $user->id,
+        'montant' => 50000,
+        'date_heure' => now(),
+    ]);
+
+    getJson('/api/journal?type[]=versement')
+        ->assertOk()
+        ->assertJsonCount(1, 'data.evenements')
+        ->assertJsonPath('data.evenements.0.type', 'versement')
+        ->assertJsonPath('data.evenements.0.montant', 50000);
 });

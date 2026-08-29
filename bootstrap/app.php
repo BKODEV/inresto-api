@@ -12,6 +12,7 @@ use App\Exceptions\ReceptionException;
 use App\Exceptions\RemiseException;
 use App\Exceptions\RoleException;
 use App\Exceptions\SessionCaisseException;
+use App\Exceptions\SessionCuisineException;
 use App\Exceptions\SousRecetteException;
 use App\Exceptions\TableSalleException;
 use App\Exceptions\UserException;
@@ -74,6 +75,10 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         $exceptions->render(function (SessionCaisseException $e) {
+            return ApiResponse::custom($e->status, 'error', $e->getMessage());
+        });
+
+        $exceptions->render(function (SessionCuisineException $e) {
             return ApiResponse::custom($e->status, 'error', $e->getMessage());
         });
 

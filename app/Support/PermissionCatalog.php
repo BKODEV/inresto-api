@@ -70,6 +70,13 @@ final class PermissionCatalog
                 'session_caisse.utiliser' => 'Utiliser une session de caisse',
                 ...self::crud('commande_client', 'les commandes client'),
                 'commande_client.encaisser' => 'Encaisser une commande client',
+                'commande_client.marquer_pret' => 'Annoncer un plat prêt au pass',
+                ...self::crud('poste_cuisine', 'les postes de production'),
+                // Le service de la brigade, distinct de celui du comptoir : la
+                // cuisine ouvre à la mise en place et ferme après le nettoyage.
+                'session_cuisine.view' => 'Consulter les services de cuisine',
+                'session_cuisine.ouvrir' => 'Ouvrir un service de cuisine',
+                'session_cuisine.fermer' => 'Fermer un service de cuisine',
                 'session_caisse.forcer_fermeture' => 'Fermer une caisse sans que tout soit compté',
                 'versement.view' => 'Consulter les versements de caisse',
                 'versement.create' => 'Sortir de l\'argent du tiroir (coffre, banque, direction)',

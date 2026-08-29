@@ -40,12 +40,23 @@ class LigneCommandeClient extends Model
         'prix_unitaire' => 'decimal:2',
         'statut' => Statut::class,
         'envoyee_le' => 'datetime',
+        'prete_le' => 'datetime',
         'servie_le' => 'datetime',
     ];
 
     public function commande(): BelongsTo
     {
         return $this->belongsTo(CommandeClient::class, 'commande_client_id');
+    }
+
+    /**
+     * Le service de cuisine qui a produit cette ligne. Posé à l'envoi, jamais à
+     * la création : une ligne au brouillon n'a été produite par personne. Nul
+     * quand aucun service n'était ouvert — la salle n'attend pas la brigade.
+     */
+    public function sessionCuisine(): BelongsTo
+    {
+        return $this->belongsTo(SessionCuisine::class, 'session_cuisine_id');
     }
 
     public function produit(): BelongsTo
@@ -70,6 +81,19 @@ class LigneCommandeClient extends Model
     public function estEnvoyee(): bool
     {
         return $this->envoyee_le !== null;
+    }
+
+    /**
+     * Annoncée prête au pass par la cuisine, pas encore emportée.
+     *
+     * Signal de cuisine, donc RÉVERSIBLE : un plat annoncé trop tôt se dévalide.
+     * C'est pour cela qu'aucun mouvement de stock n'y est accroché — ils
+     * battraient au rythme des corrections du pass. Le stock ne bouge qu'au
+     * service, voir {@see estServie()}.
+     */
+    public function estPrete(): bool
+    {
+        return $this->prete_le !== null;
     }
 
     /** Servie et déstockée. Empêche un second service de redéstocker. */

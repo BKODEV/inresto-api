@@ -180,6 +180,9 @@ class PdfService
             'lignesMatiere.matierePremiere',
             'lignesMatiere.unite',
             'lignesSousRecette.sousRecette',
+            'etapes',
+            'materiels',
+            'pointsCritiques',
         ]);
 
         // Une fiche technique est une définition partagée : elle ne porte aucun

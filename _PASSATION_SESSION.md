@@ -31,14 +31,21 @@
 
 ## État global
 
-- **596 tests API verts (1745 assertions)**, **141 tests front verts**, builds
-  propres, Pint clean.
-- **Travail en cours sur la branche `feat/tables-caisse-audit`**, dans les **deux**
+- **684 tests API verts (1989 assertions)**, **231 tests front verts**, builds
+  propres.
+- ⚠️ **Formatage : propre sur le périmètre modifié, PAS sur le dépôt entier.**
+  `vendor/bin/pint --test` signale **23 fichiers** en dérive (migrations d'origine,
+  enums, helpers, `lang/`) et `npx prettier --check "src/app/**"` **18 fichiers** —
+  aucun touché par cette branche. La convention `--dirty` du CLAUDE.md n'inspecte
+  que les fichiers modifiés, la dérive s'est donc accumulée sans se voir. À
+  reformater d'un coup dans un commit dédié, **jamais** en même temps qu'une
+  fonctionnalité : sinon la revue devient illisible.
+- **Travail en cours sur la branche `feat/pass-cuisine`**, dans les **deux**
   dépôts, **ni fusionnée ni poussée** :
-  - API → 10 commits d'avance sur `main`, HEAD `493fe6c`.
-  - Front → 12 commits d'avance sur `main`, HEAD `7774c02`.
+  - API → 6 commits d'avance sur `main`, HEAD `7c2d0c7`.
+  - Front → 18 commits d'avance sur `main`, HEAD `c8f3356`.
+  - Arbres de travail **propres** des deux côtés.
   - Distants : `git@github.com:BKODEV/inresto-api.git` · `…/inresto-app.git`.
-- Seul fichier non commité : `.env.example` (ajout de `FRONTEND_URL`, cf. plus bas).
 - Modules livrés (back testé + front câblé) :
   - **Socle & multi-site** : sites, points de vente, caisses, périmètre user par
     site — **appliqué par le serveur** (voir Décisions structurantes).
@@ -46,7 +53,9 @@
     budgets & dépenses.
   - **Stock** : `StockService` (PMP), inventaires, lecture par site et journal
     des mouvements.
-  - **Recettes** : sous-recettes, fiches techniques versionnées.
+  - **Recettes** : sous-recettes, fiches techniques versionnées, **méthodologie**
+    (étapes ordonnées, matériel, points critiques) versionnée avec la fiche et
+    imprimée sur le PDF.
   - **Salle / vente** : produits & cartes, tables (archivage réversible, création
     en lot), commandes client **servies par tours**, KDS adossé aux **lignes**,
     déstockage, remises / annulations.
@@ -59,13 +68,27 @@
   - **Pourboires** : colonne dédiée sur le paiement, soldes par serveur,
     reversement par versement `personnel`, écran « Mes pourboires » pour le serveur.
   - **Journal d'activité** : frise chronologique **en lecture seule**, agrège les
-    traces des autres modules (annulations, remises, paiements, versements,
-    impressions) sans jamais écrire.
+    **six** sources des autres modules (annulations, remises, paiements,
+    encaissements, versements, impressions) sans jamais écrire. Filtrable par
+    type, dates, site et **point de vente**.
+  - **Relecture remises / annulations** : `GET /api/remises` et
+    `GET /api/annulations`, paginées et filtrées, sous `remise.view` et
+    `annulation.view`.
+  - **Postes de production cuisine** : `postes_cuisine` + catégories associées,
+    filtre `poste_cuisine_id` sur le KDS, écran Pass.
+  - **Services de cuisine** : `sessions_cuisine` par point de vente, brigade en
+    pivot, rattachement des lignes à l'envoi, rapport de production. Section
+    **CUISINE** du menu, avec les postes de production, les recettes, le KDS et
+    le Pass — séparée de SALLE & VENTE et d'ACHATS & STOCK.
+  - **Brigade rattachée aux postes** : pivot `poste_cuisine_user`, lecture
+    minimale `GET /points-de-vente/{id}/personnel[?cuisine=1]`.
   - **Menu public par QR** : jeton **par table**, seul périmètre non authentifié.
   - **PDF** : bon de commande, fiche technique, facture A4, **addition et reçu**
     (un gabarit 80mm à deux états), rapport de fermeture, planches QR.
   - **Utilisateurs & Rôles** : RBAC admin complet, commande `inresto:install`.
   - **Reporting** (lecture seule) : ventes, food cost, stock, budget, dashboard.
+    Le **flop** produits (`ordre=asc`) et le **détail par matière** des écarts
+    d'inventaire (`detail=true`) sont désormais atteignables depuis l'écran.
 - **Données de démo** : `inresto:demo` regénère un jeu complet ;
   `inresto:demo-carte` est **additive et idempotente**.
 
@@ -103,6 +126,22 @@ décisions transverses dans les **mémoires**. À retenir en tête :
   sous permission).
 - **PDF orientés revente** : zéro donnée d'établissement en dur (test
   anti-régression), en-tête pris sur le site d'impression.
+- **Le service de cuisine est INDÉPENDANT de la session de caisse** : un point de
+  vente porte plusieurs caisses pour une seule cuisine, la brigade travaille
+  avant la première ouverture (mise en place) et après la dernière fermeture
+  (nettoyage), et une caisse fermée par erreur ne doit pas fermer la cuisine.
+  Une ligne s'y rattache à `envoyee_le`, et l'absence de service ouvert ne bloque
+  jamais un envoi.
+- **La brigade est faite d'individus, jamais d'une « équipe » référencée** : une
+  équipe nommée changerait de composition et réécrirait le passé. Elle ne pourra
+  être qu'un pré-remplissage, si le besoin vient. On se recrute parmi les
+  **postes de production** (`poste_cuisine_user`), pas dans la liste du personnel.
+- **Une entrée de menu porte la même permission que l'API derrière elle**, et
+  la racine / la sortie de connexion / la route inconnue résolvent la **première
+  entrée ouverte** à l'utilisateur — jamais `/dashboard` en dur, qui exige
+  `reporting.dashboard`. Les écrans **hors shell** (KDS, Pass) passent en
+  second, mais deviennent la destination quand ils sont les seuls ouverts :
+  c'est ce qui permet à un compte d'appareil de démarrer sur son écran.
 - **Front : la portée de site est un tri-état** — « à choisir », un site, ou la
   vue consolidée. Les écrans opérationnels refusent le mode consolidé
   → [[perimetre-site-applique]].
@@ -111,15 +150,29 @@ décisions transverses dans les **mémoires**. À retenir en tête :
 
 ### Paramétrage à faire dans l'application
 
-1. **Modes de paiement** : la fermeture exige désormais qu'un compte soit saisi
+1. **Compte de l'écran mural de cuisine**, à créer à la main : un rôle
+   `ecran-cuisine` portant EXACTEMENT `commande_client.view` et
+   `commande_client.marquer_pret`, puis un utilisateur « Écran cuisine — *PDV* »
+   rattaché à ce seul rôle et au site du point de vente. `RoleSeeder` ne touche
+   que les rôles qu'il déclare, donc ce rôle-là survit aux déploiements.
+   Ne PAS y ajouter `poste_cuisine.view` : le filtre par poste n'a pas de sens
+   sur un écran unique, et la permission ouvrirait l'écran des postes.
+
+2. **Modes de paiement** : la fermeture exige désormais qu'un compte soit saisi
    pour **chaque mode actif**. Il faut donc désactiver « Virements » et
    « Chèques » (non acceptés dans ce restaurant), et créer « Carte bancaire »
    **décoché « en tiroir »** quand le TPE arrivera.
-2. **`pourboire.suivre_les_siens`** n'est attribuée à **aucun rôle** par choix :
+3. **`pourboire.suivre_les_siens`** n'est attribuée à **aucun rôle** par choix :
    l'écran « Mes pourboires » existe mais reste invisible tant que la direction
    ne l'accorde pas. `session_caisse.forcer_fermeture` est allée au **gérant**,
    pas au caissier.
-3. Après un déploiement, enchaîner **les deux** seeders :
+4. **Nouvelles permissions** à semer : `session_cuisine.view|ouvrir|fermer`
+   (chef-cuisine les trois, gérant la lecture seule). Elles sont dans
+   `PermissionCatalog` et `RoleSeeder` — donc couvertes par le point suivant.
+   ⚠️ Les rôles **en base de dev sont périmés** : `chef-cuisine` n'y porte
+   aucune permission `poste_cuisine`. Rejouer les deux seeders avant toute
+   vérification manuelle, sinon l'écran des postes paraîtra cassé.
+5. Après un déploiement, enchaîner **les deux** seeders :
    `db:seed --class=PermissionSeeder` (enregistre les permissions) puis
    `db:seed --class=RoleSeeder` (les attribue aux rôles système).
    ⚠️ **`RoleSeeder` fait un `syncPermissions`** : il **REMPLACE** le jeu de
@@ -131,53 +184,74 @@ décisions transverses dans les **mémoires**. À retenir en tête :
 
 ### Prérequis déploiement
 
-4. `php artisan migrate` puis `php artisan storage:link` (logos **et** photos).
-5. **php.ini prod** : `post_max_size` = `upload_max_filesize` = **8M** (sinon
+6. `php artisan migrate` puis `php artisan storage:link` (logos **et** photos).
+7. **php.ini prod** : `post_max_size` = `upload_max_filesize` = **8M** (sinon
    upload logo coupé au *Request Startup*, avant Laravel).
-6. **`FRONTEND_URL` doit pointer sur le front**, jamais sur l'API. Elle sert aux
+8. **`FRONTEND_URL` doit pointer sur le front**, jamais sur l'API. Elle sert aux
    liens de réinitialisation de mot de passe **et** aux QR de table
    (`PUBLIC_MENU_BASE_URL` → `FRONTEND_URL` → `APP_URL`). Absente, la chaîne de
    repli tombait sur `APP_URL` et les QR menaient à un 404 sur l'API — c'était le
    cas en dev jusqu'à aujourd'hui. Elle figure maintenant dans `.env.example`.
    **Les QR déjà imprimés portent l'ancienne URL et sont à réimprimer.**
-7. **SMTP** configuré (reset mots de passe).
-8. Avant d'appliquer le périmètre en prod, vérifier qu'aucun compte n'est
+9. **SMTP** configuré (reset mots de passe).
+10. Avant d'appliquer le périmètre en prod, vérifier qu'aucun compte n'est
    orphelin : `User::doesntHave('sites')->count()` doit valoir 0.
 
 ### Pièges techniques rencontrés (à ne pas redécouvrir)
 
-9. **SQLite reconstruit la table dès qu'on ajoute une clé étrangère**, et la
+11. **SQLite reconstruit la table dès qu'on ajoute une clé étrangère**, et la
    reconstruction **perd silencieusement les index partiels et les contraintes
    CHECK**. Deux fois le cas cette session (index « une seule session ouverte »,
    contrainte `destination` des versements). Toute migration qui ajoute une FK
    doit **reposer explicitement** ce qu'elle risque d'emporter. Corollaire : les
    tests peuvent être verts pendant que PostgreSQL rejette — **vérifier sur la
    vraie base**.
-10. **`enum()->change()` produit du SQL invalide sur PostgreSQL.** Utiliser une
+12. **`enum()->change()` produit du SQL invalide sur PostgreSQL.** Utiliser une
     branche pgsql explicite (`ALTER COLUMN … TYPE` + `ADD CONSTRAINT`), ou
     convertir la colonne en `string` et laisser l'enum PHP faire la loi.
-11. **Toute migration se valide par `migrate:rollback` puis re-migrate sur
+13. **Toute migration se valide par `migrate:rollback` puis re-migrate sur
     PostgreSQL**, pas seulement à l'aller.
-12. **Budget de style Angular : 8 kB par composant.** Dépassé trois fois cette
+14. **Budget de style Angular : 8 kB par composant.** Dépassé trois fois cette
     session ; la parade est d'extraire les blocs partagés dans un `.scss`
     voisin (`reglement.scss`, `caisse.page.scss`).
-13. **Convention de test API** : chaque fichier définit son propre helper
+15. **Convention de test API** : chaque fichier définit son propre helper
     `actingAs…`. Réutiliser un nom déjà pris provoque une **erreur fatale PHP**
     (redéclaration) — la suite sort en code 255 **sans aucune sortie**, alors que
     chaque fichier passe isolément.
-14. `caisse.layout.spec.ts` laisse passer **2 « unhandled rejections »** du
+16. `caisse.layout.spec.ts` laisse passer **2 « unhandled rejections »** du
     routeur Angular (`NG04002` sur `vente/caisse/ventes` et `…/pourboires`) : le
-    test ne déclare pas ces routes. Les 141 tests passent, mais Vitest prévient
-    à juste titre que ce genre de bruit peut masquer un faux positif — à nettoyer.
+    test ne déclare pas ces routes. La suite passe, mais Vitest prévient à juste
+    titre que ce genre de bruit peut masquer un faux positif — à nettoyer.
+17. **Une entrée d'écran et la permission de l'API qui l'alimente doivent être
+    tenues par les MÊMES rôles.** Deux cas rencontrés le même jour : le
+    sélecteur de brigade appelait `GET /users` (`utilisateur.view`, absente du
+    chef) et l'écran des postes vivait sous Paramètres (`parametre.view`, idem).
+    Dans les deux cas l'écran s'affichait et se chargeait vide — ce qui se lit
+    comme une panne, pas comme un refus. Un test verrouille désormais que chaque
+    entrée de menu résout vers une vraie route (`app.routes.spec.ts`), mais la
+    correspondance des permissions reste à vérifier à la main.
+18. **`LigneCommandeClientFactory::envoyee()` rappelle `now()` à chaque ligne.**
+    Le KDS groupe ses tours par (commande, `envoyee_le`) : deux lignes créées de
+    part et d'autre d'une seconde formaient deux tours au lieu d'un, d'où un
+    échec intermittent (≈1 sur 3). Tout test attendant PLUSIEURS lignes dans un
+    seul tour doit appeler `$this->freezeTime()` — c'est écrit sur la factory.
+    En production le problème n'existe pas : `envoyerEnCuisine()` pose un seul
+    horodatage pour tout le tour.
+19. **Un écran peut être entièrement codé et rester inatteignable.** Le tiroir de
+    versement, `openVerser()` et ses tests unitaires existaient depuis des
+    semaines : aucun élément du gabarit ne l'appelait. Un test de *classe* ne
+    voit pas ce trou — il faut un test de **rendu** (`TestBed.createComponent`).
+    Même famille : `choisirMode()` à l'encaissement, documenté « des boutons et
+    non une liste » pendant que le gabarit gardait le `<select>`.
 
 ### Dettes connues
 
-15. **Le site `PRINCIPAL` n'a pas forcément de fiche d'établissement** : tout PDF
+20. **Le site `PRINCIPAL` n'a pas forcément de fiche d'établissement** : tout PDF
     passant par le repli sortira sans en-tête.
-16. **Périmètre non appliqué sur `points_de_vente` et `parametre_etablissement`**,
+21. **Périmètre non appliqué sur `points_de_vente` et `parametre_etablissement`**,
     qui portent pourtant un `site_id`. Écrans réservés à des rôles
     administratifs, donc enjeu moindre — mais ils restent hors de la frontière.
-17. **Carte** : index unique partiel « une seule carte active par PDV » resté
+22. **Carte** : index unique partiel « une seule carte active par PDV » resté
     app-level (`UpdateCarteRequest`). Pas urgent.
 
 ## Mémoires liées (décisions structurantes)
@@ -186,4 +260,4 @@ décisions transverses dans les **mémoires**. À retenir en tête :
 `module-reporting` · `module-menu-public-qr` · `modele-encaissement-comptoir` ·
 `caisse-addition-vs-recu` · `pmp-decimal-precision` · `unites-de-mesure-etiquettes` ·
 `convention-seeders-vs-demo` · `carte-organisation-categories` ·
-`commande-fournisseur-catalogue` · `front-app-inresto`.
+`commande-fournisseur-catalogue` · `front-app-inresto` · `module-session-cuisine`.

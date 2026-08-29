@@ -14,6 +14,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Log;
 
 use function Pest\Laravel\deleteJson;
+use function Pest\Laravel\getJson;
 use function Pest\Laravel\postJson;
 
 uses(RefreshDatabase::class);
@@ -186,4 +187,137 @@ it('refuse une annulation sans la permission annulation.create', function () {
     $commande = commandeSur($ctx, $user, 'ouverte');
 
     postJson("/api/commandes-client/{$commande->id}/annuler", ['motif' => 'x'])->assertForbidden();
+});
+
+// ───────────────────────── relecture (index) ─────────────────────────
+
+/**
+ * `annulation.view` figurait au catalogue de permissions et la policy portait
+ * déjà `viewAny` — sans aucune route pour les consommer : l'accorder à un rôle
+ * n'ouvrait rien. Le journal montre les annulations au fil du service ; cette
+ * liste répond à la question de contrôle, sur une période et par sort.
+ */
+it('liste les annulations, de la plus récente à la plus ancienne', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['annulation.view']);
+    $commande = commandeSur($ctx, $user);
+
+    Annulation::factory()->create([
+        'annulable_type' => 'commandes_client', 'annulable_id' => $commande->id,
+        'user_id' => $user->id, 'motif' => 'ancienne', 'date_heure' => now()->subHour(),
+    ]);
+    Annulation::factory()->create([
+        'annulable_type' => 'commandes_client', 'annulable_id' => $commande->id,
+        'user_id' => $user->id, 'motif' => 'récente', 'date_heure' => now(),
+    ]);
+
+    getJson('/api/annulations')
+        ->assertOk()
+        ->assertJsonCount(2, 'data.annulations')
+        ->assertJsonPath('data.annulations.0.motif', 'récente')
+        ->assertJsonPath('data.annulations.1.motif', 'ancienne')
+        ->assertJsonPath('data.pagination.total', 2);
+});
+
+it('refuse la relecture sans la permission dédiée', function () {
+    // Annuler et relire les annulations sont deux droits distincts : un serveur
+    // annule ses propres lignes sans avoir à consulter celles de la maison.
+    $ctx = salleContext();
+    actingAsServeur($ctx->site, ['annulation.create']);
+
+    getJson('/api/annulations')->assertForbidden();
+});
+
+/**
+ * La question de contrôle : ce qui a été annulé APRÈS service est-il reparti en
+ * stock, ou passé en perte. Sans ce filtre il faut la lire à l'œil.
+ */
+it('filtre sur le devenir du stock', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['annulation.view']);
+    $commande = commandeSur($ctx, $user);
+
+    foreach (['perte', 'remise_en_stock', null] as $sort) {
+        Annulation::factory()->create([
+            'annulable_type' => 'commandes_client', 'annulable_id' => $commande->id,
+            'user_id' => $user->id, 'sort' => $sort, 'date_heure' => now(),
+        ]);
+    }
+
+    getJson('/api/annulations?sort=perte')
+        ->assertOk()
+        ->assertJsonCount(1, 'data.annulations')
+        ->assertJsonPath('data.annulations.0.sort', 'perte');
+});
+
+it('refuse un devenir de stock inconnu (422)', function () {
+    $ctx = salleContext();
+    actingAsServeur($ctx->site, ['annulation.view']);
+
+    getJson('/api/annulations?sort=poubelle')
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('sort');
+});
+
+/**
+ * Une annulation n'a pas de site à elle : elle le tient de ce qu'elle annule —
+ * une commande par sa table, une LIGNE par sa commande puis sa table. Deux
+ * chemins, et le périmètre doit tenir sur les deux.
+ */
+it('borne au périmètre de sites, ligne comme commande', function () {
+    $ctx = salleContext();
+    $autre = salleContext();
+    $user = actingAsServeur($ctx->site, ['annulation.view']);
+
+    $chezMoi = commandeSur($ctx, $user);
+    $ailleurs = commandeSur($autre, $user);
+    $ligneAilleurs = LigneCommandeClient::factory()->create([
+        'commande_client_id' => $ailleurs->id,
+        'produit_id' => produitSurCarte($autre)->id,
+    ]);
+
+    Annulation::factory()->create([
+        'annulable_type' => 'commandes_client', 'annulable_id' => $chezMoi->id,
+        'user_id' => $user->id, 'motif' => 'la mienne', 'date_heure' => now(),
+    ]);
+    Annulation::factory()->create([
+        'annulable_type' => 'commandes_client', 'annulable_id' => $ailleurs->id,
+        'user_id' => $user->id, 'motif' => 'hors périmètre', 'date_heure' => now(),
+    ]);
+    Annulation::factory()->create([
+        'annulable_type' => 'lignes_commande_client', 'annulable_id' => $ligneAilleurs->id,
+        'user_id' => $user->id, 'motif' => 'ligne hors périmètre', 'date_heure' => now(),
+    ]);
+
+    getJson('/api/annulations')
+        ->assertOk()
+        ->assertJsonCount(1, 'data.annulations')
+        ->assertJsonPath('data.annulations.0.motif', 'la mienne');
+});
+
+it('remonte à la note, qu\'on ait annulé la commande ou l\'une de ses lignes', function () {
+    // Les deux natures d'annulation doivent mener au même endroit : sans cela,
+    // la moitié des lignes du contrôle est un cul-de-sac.
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['annulation.view']);
+    $commande = commandeSur($ctx, $user);
+    $ligne = LigneCommandeClient::factory()->create([
+        'commande_client_id' => $commande->id,
+        'produit_id' => produitSurCarte($ctx)->id,
+    ]);
+
+    Annulation::factory()->create([
+        'annulable_type' => 'commandes_client', 'annulable_id' => $commande->id,
+        'user_id' => $user->id, 'date_heure' => now()->subMinute(),
+    ]);
+    Annulation::factory()->create([
+        'annulable_type' => 'lignes_commande_client', 'annulable_id' => $ligne->id,
+        'user_id' => $user->id, 'date_heure' => now(),
+    ]);
+
+    getJson('/api/annulations')
+        ->assertOk()
+        ->assertJsonPath('data.annulations.0.commande_client_id', $commande->id)
+        ->assertJsonPath('data.annulations.1.commande_client_id', $commande->id)
+        ->assertJsonPath('data.annulations.0.auteur', trim($user->prenom.' '.$user->nom));
 });

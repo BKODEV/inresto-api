@@ -25,6 +25,12 @@ class FicheTechniqueController extends Controller
         'lignesMatiere.matierePremiere',
         'lignesMatiere.unite',
         'lignesSousRecette.sousRecette',
+        // La méthodologie fait partie de la fiche, pas d'un appel séparé : elle
+        // est ce qui rend la liste des matières exécutable par quelqu'un qui
+        // n'a jamais fait le plat.
+        'etapes',
+        'materiels',
+        'pointsCritiques',
     ];
 
     public function __construct(private readonly FicheTechniqueService $service) {}

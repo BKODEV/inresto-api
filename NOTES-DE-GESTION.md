@@ -17,8 +17,10 @@
 - [Définitions partagées vs opérations rattachées au site](#définitions-partagées-vs-opérations-rattachées-au-site)
 - [Utilisateurs, rôles & permissions](#utilisateurs-rôles--permissions)
 - [Versioning des fiches techniques](#versioning-des-fiches-techniques)
+- [La méthodologie fait partie de la fiche](#la-méthodologie-fait-partie-de-la-fiche)
 - [Prix de vente porté par la carte, pas par le produit](#prix-de-vente-porté-par-la-carte-pas-par-le-produit)
 - [Une seule session de caisse ouverte par caisse](#une-seule-session-de-caisse-ouverte-par-caisse)
+- [Le service de cuisine, indépendant de la caisse](#le-service-de-cuisine-indépendant-de-la-caisse)
 - [Déstockage à la vente : au service, jamais bloquant](#déstockage-à-la-vente--au-service-jamais-bloquant)
 - [Encaissement, remises encadrées & annulations](#encaissement-remises-encadrées--annulations)
 - [Un mode de paiement est un contenant](#un-mode-de-paiement-est-un-contenant)
@@ -558,6 +560,57 @@ l'envoyer vide est refusé).
 > site n'aurait accès à rien : il serait en 403 permanent sur le stock, les
 > inventaires, les réceptions et les budgets.
 
+### On ne dépose personne sur un écran qu'il ne peut pas ouvrir
+
+La racine `/`, la sortie de connexion et la route inconnue ne visent pas un
+écran en dur : elles résolvent la **première entrée de menu que l'utilisateur
+peut réellement ouvrir**, dans l'ordre du menu — qui est déjà l'ordre
+d'importance métier.
+
+> **Pourquoi ?** Elles pointaient toutes `/dashboard`, écran gouverné par
+> `reporting.dashboard`. Un caissier ou un cuisinier, qui ne l'ont pas,
+> atterrissaient à chaque connexion sur une page qui ne pouvait que refuser de
+> se charger.
+
+Corollaire : une entrée de menu doit porter la **même permission que l'API**
+derrière elle. Un refus doit se voir avant le clic, et se lire comme un refus —
+pas comme une panne de chargement.
+
+### Un écran mural se connecte avec un compte d'APPAREIL
+
+L'écran de cuisine est une tablette fixée au mur, sans propriétaire : qui passe
+devant dispose de tout ce que le compte connecté peut faire — y compris en
+ouvrant un autre onglet, le jeton valant pour toute l'API.
+
+D'où un compte dédié, au strict minimum : **exactement** `commande_client.view`
+(lire la file) et `commande_client.marquer_pret` (annoncer, et défaire
+l'annonce). Rien d'autre : ni session, ni caisse, ni stock, ni paramétrage.
+
+> **« Tout le monde peut alors taper prêt »** — et c'est sans conséquence :
+> `marquerPret` n'écrit que `prete_le`, **sans auteur**. C'est une sonnette, pas
+> une signature. Le geste est réversible par la même permission, et
+> l'attribution existe au bon niveau — la **brigade** du service de cuisine, qui
+> est la seule granularité honnête pour un écran tapé par qui est le plus près.
+
+Le compte d'appareil ne porte **pas** `poste_cuisine.view` : le filtre par poste
+n'a pas de sens sur l'écran unique d'une cuisine, et cette permission ouvrirait
+au passage l'écran des postes de production.
+
+**Corollaire sur l'atterrissage** : les écrans hors shell passent en second dans
+`premiereRouteAutorisee`, mais deviennent la destination quand ils sont les
+**seuls** ouverts — sans quoi la tablette murale démarrerait à chaque fois sur
+`/dashboard`, qu'elle n'a pas le droit d'ouvrir.
+
+**Corollaire sur la prise de commande** : son entrée est gouvernée par
+`commande_client.create`, et non `.view`. La cuisine détient `.view` pour lire sa
+file ; l'y envoyer lui donnait une liste de notes sur laquelle elle ne peut rien.
+
+> Le pass, lui, n'est **pas** un appareil partagé : chaque serveur a sa tablette
+> et s'y connecte avec son compte. `commande_client.update` y est exactement son
+> métier, et le déstockage du service est signé — `servir()` transmet
+> l'utilisateur au `StockService`, donc le mouvement `sortie_vente` porte son
+> auteur.
+
 ### Le super-admin court-circuite tout
 
 Le `super-admin` **ignore** hiérarchie **et** périmètre (il gère tout, sur tous les
@@ -583,6 +636,45 @@ de façon atomique. L'historique des versions est **figé**.
 Corollaire : une fiche **archivée** est immuable (suppression → 409). La cascade
 de recalcul (une sous-recette change → recalcul des fiches **actives** qui
 l'utilisent) ne touche que les versions actives.
+
+---
+
+## La méthodologie fait partie de la fiche
+
+### Règle d'or
+
+Une fiche technique porte **comment on produit le plat**, pas seulement ce qu'il
+coûte : **étapes** ordonnées (avec une durée facultative), **matériel** et
+**points critiques**. Les trois sont **versionnés avec la fiche**, comme le coût.
+
+> **Pourquoi ?** Une fiche qui liste les matières sans dire quoi en faire n'est
+> pas exécutable : un extra tient la liste des courses, pas la recette. C'est le
+> jour où on embauche pour un service qu'on découvre ce qui manquait.
+
+### L'ordre vient de la position, jamais du client
+
+Le tableau reçu **est** l'ordre : le serveur numérote d'après la position, il n'y
+a aucun champ `ordre` au contrat. Deux étapes au même rang rendraient la fiche
+imprimée non déterministe — et un intérimaire ferait mariner après avoir servi.
+Réordonner, côté écran, est un déplacement de ligne.
+
+### Les points critiques ne sont pas des étapes
+
+Une étape se lit une fois, en séquence. Un **point critique** — cuisson à cœur,
+allergène, chaîne du froid — doit rester visible pendant **toute** la production.
+D'où une table à part, un enum fermé (`TypePointCritique`), et une position **en
+tête** du bloc méthodologie sur le PDF.
+
+### Ce qui reste facultatif, et pourquoi
+
+| Élément | Facultatif | Raison |
+|---|---|---|
+| Toute la méthodologie | oui | Les fiches existantes n'en ont pas, et un plat d'assemblage n'a pas de mode opératoire. L'exiger casserait la saisie. |
+| `duree_minutes` d'une étape | oui | « Laisser reposer » n'a pas toujours une durée qu'on veuille chiffrer ; un `0` imposé se lirait comme « instantané ». |
+
+`duree_totale_minutes` ne somme que les étapes **chiffrées**, et vaut `null`
+quand aucune ne l'est — annoncer « 0 min » sur une recette non chiffrée serait un
+mensonge utile à personne.
 
 ---
 
@@ -652,6 +744,102 @@ ne peut pas en ouvrir une seconde sur la **même** caisse (409).
 
 ---
 
+## Le service de cuisine, indépendant de la caisse
+
+### Règle d'or
+
+La brigade a **son propre service** (`sessions_cuisine`), rattaché au **point de
+vente** et **jamais ouvert ni fermé par la caisse**. Une ligne s'y rattache au
+moment où elle **part en cuisine** (`envoyee_le`).
+
+> **Pourquoi ce qu'il apporte ?** Les ventes disent quel **serveur** a vendu un
+> plat. Elles ne disent jamais quelle **équipe** l'a produit. C'est la seule
+> question à laquelle ce module répond.
+
+### Pourquoi indépendant, et pas ouvert par la caisse
+
+Trois raisons, dans l'ordre où elles mordent :
+
+1. Un point de vente porte **plusieurs caisses pour une seule cuisine** : coupler
+   obligerait à désigner arbitrairement laquelle commande le service.
+2. La brigade travaille **avant** la première ouverture de caisse (mise en place)
+   et **après** la dernière fermeture (nettoyage). Ces heures disparaîtraient du
+   suivi.
+3. Une caisse fermée par erreur **fermerait la cuisine en plein service**.
+
+Même garde-fou que la caisse en revanche : **un seul service ouvert par point de
+vente**, index unique partiel en base, pour la même raison — deux services
+ouverts rendraient le rattachement des lignes ambigu.
+
+### La brigade est un pivot, pas une colonne
+
+`ouvert_par` dit qui a tourné la clé ; `session_cuisine_user` dit **qui a tenu le
+service**. Le chef ouvre, trois commis produisent. Qui ouvre est ajouté d'office à
+l'équipe, et l'équipe se **corrige à la fermeture** — c'est là qu'on sait qui a
+réellement travaillé, remplacements compris.
+
+### Deux règles qui suivent le principe « rien ne bloque un service »
+
+- **Aucun service ouvert ⇒ le tour part quand même**, simplement sans être imputé
+  à une équipe. Un oubli de la brigade n'a pas à immobiliser la salle.
+- **La fermeture est refusée (409) tant que des plats envoyés ne sont pas
+  annoncés au pass.** Les laisser rattachés à un service clos les ferait
+  disparaître de la file, sans que personne ne les termine.
+
+### Production
+
+`GET /sessions-cuisine/{id}/production` agrège **par produit** : quantité et CA,
+adossés aux **lignes** comme tout le reporting. Les lignes annulées en sont
+exclues — la brigade les a préparées, mais elles n'ont rien vendu.
+
+### La brigade se recrute parmi les postes de production
+
+Un poste de production porte les **deux moitiés** de l'organisation du pass : les
+**catégories** disent ce qu'on y produit, les **membres** qui le tient. Être
+rattaché à au moins un poste d'un point de vente, c'est **être de la cuisine** de
+ce point de vente — et c'est ce que propose le sélecteur de brigade.
+
+> **Pourquoi ?** Il déroulait tout le personnel du site, serveurs et caissiers
+> compris. Et surtout il passait par `GET /users`, qui exige `utilisateur.view` —
+> une permission d'**administration du personnel** que le chef de cuisine n'a
+> pas. Il était donc en **403 sur le seul écran qu'il tient**, sans voir personne
+> à inscrire.
+
+Le personnel affectable est servi par une lecture **minimale** — `{id, nom}` —
+sur `GET /points-de-vente/{id}/personnel`, gouvernée par `poste_cuisine.view` :
+cocher des noms ne demande pas d'ouvrir les dossiers du personnel.
+
+**Un extra reste inscriptible** : `?cuisine=1` restreint aux membres des postes,
+sans le drapeau on obtient tout le personnel du site. Borner la brigade à
+l'organigramme rendrait un service tenu par un intérimaire imputable à personne.
+
+Un membre doit appartenir au **site** du point de vente — refus explicite en 422,
+là où un `sync` aurait accepté sans broncher quelqu'un d'un autre établissement.
+
+### Pas d'entité « Équipe », et pourquoi
+
+Un service stocke des **individus** (`session_cuisine_user`), jamais une
+référence à une équipe nommée. Une équipe change de composition : si le service
+ne portait qu'un `equipe_id`, modifier « Équipe Matin » en mars réécrirait qui a
+travaillé en **janvier** — exactement ce qu'interdit la règle « les valeurs
+d'audit sont figées, jamais recalculées ».
+
+Une équipe nommée ne pourrait donc être qu'un **pré-remplissage** du sélecteur.
+Elle s'ajoutera sans rien casser le jour où les services se stabiliseront ;
+tant qu'ils tournent avec des extras, elle serait périmée en permanence.
+
+### Les postes ne sont pas un paramètre global
+
+Ils vivent sous **CUISINE**, pas sous Paramètres : c'est l'organigramme du chef.
+Tant qu'ils étaient un onglet de Paramètres, il ne pouvait littéralement pas les
+ouvrir — `parametre.view` n'est accordée qu'au gérant.
+
+> **La règle générale** : une entrée d'écran et la permission de l'**API qui
+> l'alimente** doivent être tenues par les mêmes rôles. Sinon l'écran s'affiche
+> et se charge vide, ce qui se lit comme une panne et non comme un refus.
+
+---
+
 ## Déstockage à la vente : au service, jamais bloquant
 
 > Règle du **Module Salle / Lot C-1**.
@@ -667,6 +855,107 @@ l'envoi en cuisine. C'est cohérent avec le gardien unique du stock
 > **Pourquoi à « servie » et pas avant ?** Tant que le plat n'est pas produit, la
 > matière n'est pas réellement consommée. Déstocker à la commande surévaluerait
 > la consommation en cas d'annulation avant production.
+
+### « Prêt » et « servi » sont deux gestes, un seul déstocke
+
+Une ligne porte désormais trois horodatages : `envoyee_le` (partie en cuisine),
+`prete_le` (annoncée au pass) et `servie_le` (emportée en salle). `servie_le`
+portait auparavant les deux derniers faits à la fois, ce qui rendait le temps de
+production inmesurable : le chrono du KDS comptait aussi l'attente sous la lampe,
+qui n'est pas de la responsabilité de la cuisine. Séparés, les deux durées se
+lisent — `envoyee_le → prete_le` est le temps du chef, `prete_le → servie_le`
+celui de la salle.
+
+**Le déstockage reste sur `servie_le`, et lui seul.** La raison n'est pas
+comptable mais opérationnelle :
+
+> **« Prêt » est un signal de cuisine, donc RÉVERSIBLE** — on dévalide un plat
+> annoncé trop tôt (`annulerPret()`). **« Servi » est irréversible.** Accrocher
+> les mouvements de stock à l'annonce les ferait battre au rythme des
+> corrections du pass. Le stock ne s'accroche qu'à l'irréversible.
+
+Corollaire : `AnnulationService` continue de tester `estServie()` pour arbitrer
+entre `remise_en_stock` et `perte`. Déstocker au prêt l'aurait forcé à basculer
+sur `estPrete()`, et un plat annoncé puis annulé serait devenu une perte alors
+que rien n'a quitté la cuisine.
+
+**L'annonce est facultative.** Servir une ligne jamais annoncée reste permis et
+horodate les deux au même instant : une maison qui n'utilise pas le pass garde
+exactement le comportement d'avant, sans laisser `prete_le` vide sur toute sa
+production.
+
+**Pas de statut de note « prête ».** La préparation est partiellement prête par
+nature (deux lignes annoncées, trois en cuisson) ; un statut au niveau de la note
+ne sait pas l'exprimer. Le cycle de vie reste sur la ligne, et
+`StatutCommandeClient` ne bouge pas.
+
+### La granularité est la LIGNE, jamais le ticket
+
+Annoncer comme servir acceptent une liste de lignes, et les écrans s'en servent :
+on touche un plat pour l'annoncer ou l'emporter seul, le bouton du bas prend
+l'ensemble. Ce n'est pas un confort.
+
+En cuisine, une équipe tient les entrées et une autre les plats, alors qu'un même
+ticket porte les deux : n'annoncer que le ticket entier ferait attendre les
+entrées jusqu'à ce que les plats sortent.
+
+Au pass, c'est une question d'exactitude du stock. Servir déstocke : le runner
+qui n'emporte que les entrées d'une note dont les plats attendent encore sous la
+lampe déchargerait des plats jamais sortis de cuisine, et la dérive
+n'apparaîtrait qu'à l'inventaire.
+
+Les deux files portent la **catégorie du produit** sur chaque ligne. Le système
+ne sait pas ce qu'est une « entrée » — les catégories sont saisies par
+l'établissement, il ne peut donc pas trier à la place de la cuisine. Il lui donne
+de quoi lire : une puce pour repérer ses plats dans un ticket mêlé.
+
+### Postes de production : la brigade n'est pas la carte
+
+`categories_produit` est une taxonomie **commerciale** — sa colonne `ordre`
+range les sections d'une carte pour le client. La brigade est une taxonomie de
+**production** : qui cuit quoi. Les confondre casse sur deux points : une carte
+porte quinze catégories quand un pass en compte trois, et « Cocktails » et
+« Softs » sont deux sections de carte pour un seul bar.
+
+D'où `postes_cuisine`, rattaché au **point de vente** (un rooftop et un
+restaurant n'ont pas le même pass), et un **pivot** `categorie_poste_cuisine`
+plutôt qu'une clé étrangère sur la catégorie : celle-ci est une définition
+partagée, sans `site_id`, et ne peut pas porter une décision d'exploitation
+locale. Le pivot rend d'ailleurs service — la même catégorie « Cocktails » peut
+relever du bar au restaurant et du chaud au rooftop.
+
+Le système **n'apprend jamais ce qu'est une entrée** : les catégories sont
+saisies par l'établissement, il ne peut donc pas trier à sa place. Il lui fait
+déclarer ses postes une fois, et y accrocher ses propres catégories.
+
+#### La règle de sûreté
+
+> Un plat dont la catégorie n'est rattachée à **aucun** poste — ou un produit
+> sans catégorie — reste visible de **TOUS** les écrans.
+
+Une configuration incomplète doit dégrader vers « tout le monde le voit », jamais
+vers « personne ne le voit ». Un plat invisible, c'est une table qu'on ne sert
+jamais, et l'erreur ne se découvre qu'au moment où le client réclame. Même
+raison pour un poste inconnu ou appartenant à un autre pass : on ne filtre pas,
+plutôt que de renvoyer une file vide qui se lirait « service terminé ».
+
+Corollaire : un établissement qui ne déclare **aucun** poste retrouve exactement
+l'écran d'avant, sans rien paramétrer. Le filtre ne coûte rien à qui n'en veut
+pas.
+
+### Deux files, deux métiers
+
+- **KDS** (`GET /api/kds/{pdv}`) — ce qui reste à produire : envoyé, pas encore
+  annoncé. Groupé **par tour**, la cuisine produit ticket par ticket.
+- **Pass** (`GET /api/pass/{pdv}`) — ce qui attend d'être emporté : annoncé, pas
+  encore servi. Groupé **par note**, l'unité de travail du runner étant un voyage
+  vers une table : deux tours prêts pour la table 12 font un seul déplacement.
+
+Annoncer est gouverné par `commande_client.marquer_pret`, et non par
+`commande_client.update` comme le service. C'est tout l'intérêt de la séparation :
+le rôle `chef-cuisine` portait `update` faute de mieux — ce qui lui ouvrait au
+passage la modification et le service des notes de salle — et ne porte plus que
+la lecture et l'annonce. **La cuisine annonce, la salle emporte.**
 
 ### Ce qui est déchargé
 
@@ -757,6 +1046,22 @@ Toutes les annulations (ligne ou commande entière) sont **journalisées** dans 
 table polymorphe `annulations` (avec motif obligatoire). Annuler une **commande
 entière** n'est possible qu'avant le service (ouverte / envoyée en cuisine) et
 libère la table.
+
+### Relire les remises et les annulations
+
+`GET /api/remises` et `GET /api/annulations`, en **lecture seule**, paginées,
+sous `remise.view` et `annulation.view`. Filtres propres à chaque nature :
+`type` pour une remise, `sort` et `annulable_type` pour une annulation.
+
+> **Pourquoi en plus du journal ?** Le journal répond à « que s'est-il passé ce
+> soir » : il plafonne chaque source et mêle les natures. Ces listes répondent à
+> la question de contrôle, sur une période — combien a-t-on remis et sur quels
+> motifs ; ce qui a été annulé après service est-il reparti en stock ou passé en
+> perte.
+
+Le périmètre de sites suit l'objet annulé, et il y a **deux chemins** : une
+commande porte sa table, une **ligne** ne la porte que par sa commande. La
+requête traverse donc la relation polymorphe des deux façons.
 
 ---
 
@@ -970,6 +1275,19 @@ seconde : un caissier qui verse dans la foulée de sa clôture tombait entre les
 deux cas — ni retranché d'un théorique déjà figé, ni compté dans la transition.
 Le service, lui, sait sans ambiguïté si la session était ouverte.
 
+### Les sorties se lisent en face des sessions
+
+L'écran **Sessions de caisse** liste les cent dernières sorties de tiroir sous
+la table des sessions, avec leur moment (`en_service` / après fermeture), leur
+destination et le nom de qui a emporté l'argent.
+
+> **Pourquoi ?** C'est la moitié manquante de la lecture d'un écart. Un manquant
+> de 200 000 s'explique en une ligne quand le versement au coffre est affiché à
+> côté, et se cherche une heure quand il ne l'est pas.
+
+La liste et le geste partagent la même permission `versement.create` : voir
+sortir l'argent et le faire sortir relèvent du même niveau de confiance.
+
 ---
 
 ## La chaîne entre deux services
@@ -1106,6 +1424,18 @@ de lecture doit donc rester bornée — le contrôleur impose une plage de dates
 Lecture seule, sous **`journal.view`** : rien à créer ni à modifier, donc pas de
 `crud()` dans le catalogue de permissions.
 
+**Six sources, toutes filtrables** : `annulation`, `remise`, `paiement`,
+`encaissement`, `versement`, `impression`. Filtres complémentaires : plage de
+dates, site, et **point de vente** — un site porte plusieurs comptoirs, et une
+anomalie se cherche sur celui où elle a eu lieu.
+
+L'API renvoie avec les événements la **fenêtre réellement lue** (`periode`) et le
+**volume retenu** (`total`), et l'écran les affiche.
+
+> **Pourquoi ?** Sans dates fournies, la fenêtre est ramenée à la journée
+> courante, et chaque source est plafonnée. Taire ces deux bornes laisserait
+> prendre la table pour l'historique complet de la période.
+
 ---
 
 ## Machines à états — mémo transversal
@@ -1174,3 +1504,18 @@ figée** :
 
 Rapports disponibles : **ventes**, **food cost**, **stock**, **budget**, et un
 **tableau de bord** de synthèse transversale.
+
+### Deux lectures qui se demandent explicitement
+
+| Rapport | Paramètre | Ce qu'il ouvre |
+|---|---|---|
+| Ventes → produits | `ordre=asc\|desc`, croisé avec `tri=ca\|quantite` | le **flop** autant que le top : ce qu'on retire de la carte, pas seulement ce qui la porte |
+| Stock → écarts d'inventaire | `detail=true` | le **ligne à ligne** : quelles matières expliquent l'écart |
+
+> Le flop se lit **parmi ce qui s'est vendu** : la requête part des lignes
+> vendues, un produit à zéro vente n'a aucune ligne et n'y figure pas. L'écran le
+> dit, sans quoi on lit la liste comme celle des invendus.
+
+Le détail des écarts n'est **pas** demandé par défaut : sur une période large,
+c'est une ligne par matière comptée et par inventaire, pour une question qu'on
+ne pose qu'une fois l'écart repéré.

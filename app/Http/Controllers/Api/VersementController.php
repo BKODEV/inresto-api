@@ -25,7 +25,9 @@ class VersementController extends Controller
         $this->authorize('viewAny', Versement::class);
 
         $versements = $caisse->versements()
-            ->with(['user', 'session'])
+            // `beneficiaire` : un reversement de pourboires nomme la personne
+            // payée, et la liste doit dire à qui l'argent est parti.
+            ->with(['user', 'session', 'beneficiaire'])
             ->orderByDesc('date_heure')
             ->limit(100)
             ->get();

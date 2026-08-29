@@ -116,6 +116,43 @@ class FicheTechniqueService
      *
      * @param  array{lignes_matieres?: array<int, array<string, mixed>>, lignes_sous_recettes?: array<int, array<string, mixed>>}  $data
      */
+    /**
+     * Étapes, matériel et points critiques de CETTE version.
+     *
+     * L'ordre vient de la position dans le tableau reçu, jamais d'un champ que
+     * le client enverrait : deux lignes au même `ordre` rendraient la fiche
+     * imprimée non déterministe, et un intérimaire exécuterait les étapes dans
+     * le désordre. Réordonner côté écran est un glisser-déposer, pas une
+     * renumérotation à la main.
+     *
+     * @param  array{etapes?: array<int, array<string, mixed>>, materiels?: array<int, string>, points_critiques?: array<int, array<string, mixed>>}  $data
+     */
+    private function construireMethodologie(FicheTechnique $fiche, array $data): void
+    {
+        foreach (array_values($data['etapes'] ?? []) as $rang => $etape) {
+            $fiche->etapes()->create([
+                'ordre' => $rang + 1,
+                'description' => $etape['description'],
+                'duree_minutes' => $etape['duree_minutes'] ?? null,
+            ]);
+        }
+
+        foreach (array_values($data['materiels'] ?? []) as $rang => $libelle) {
+            $fiche->materiels()->create([
+                'ordre' => $rang + 1,
+                'libelle' => $libelle,
+            ]);
+        }
+
+        foreach (array_values($data['points_critiques'] ?? []) as $rang => $point) {
+            $fiche->pointsCritiques()->create([
+                'ordre' => $rang + 1,
+                'type' => $point['type'],
+                'description' => $point['description'],
+            ]);
+        }
+    }
+
     private function construire(int $produitId, int $version, array $data, string $userId): FicheTechnique
     {
         $fiche = new FicheTechnique(['produit_id' => $produitId]);
@@ -147,8 +184,18 @@ class FicheTechniqueService
             ]);
         }
 
+        $this->construireMethodologie($fiche, $data);
+
         $this->recalculerCoutMatiere($fiche);
 
-        return $fiche->load(['produit', 'lignesMatiere.matierePremiere', 'lignesMatiere.unite', 'lignesSousRecette.sousRecette']);
+        return $fiche->load([
+            'produit',
+            'lignesMatiere.matierePremiere',
+            'lignesMatiere.unite',
+            'lignesSousRecette.sousRecette',
+            'etapes',
+            'materiels',
+            'pointsCritiques',
+        ]);
     }
 }

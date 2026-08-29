@@ -51,7 +51,9 @@ class VersementService
             $versement->date_heure = now();
             $versement->save();
 
-            return $versement->load(['caisse', 'user', 'beneficiaire']);
+            // `session` : sans elle la ressource tait `en_service`, et la
+            // ligne qu'on vient de créer s'afficherait sans son moment.
+            return $versement->load(['caisse', 'user', 'beneficiaire', 'session']);
         });
     }
 

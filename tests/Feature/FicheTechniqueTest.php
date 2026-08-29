@@ -24,6 +24,7 @@ use Spatie\Permission\Models\Permission;
 use function Pest\Laravel\deleteJson;
 use function Pest\Laravel\getJson;
 use function Pest\Laravel\postJson;
+use function Pest\Laravel\putJson;
 
 uses(RefreshDatabase::class);
 
@@ -397,4 +398,172 @@ it('refuse la création sans la permission', function () {
             ['matiere_premiere_id' => matiereAvecCoutCatalogue(5)->id, 'unite_id' => UniteDeMesure::factory()->create()->id, 'quantite' => 1],
         ],
     ])->assertForbidden();
+});
+
+// ───────────────────────── méthodologie ─────────────────────────
+
+/**
+ * Une fiche qui liste les matières sans dire quoi en faire n'est pas
+ * exécutable : un intérimaire tient la liste des courses, pas la recette.
+ */
+it('enregistre étapes, matériel et points critiques', function () {
+    actingAsFicheUser(['fichetechnique.create']);
+    $produit = Produit::factory()->create();
+    $matiere = matiereAvecCoutCatalogue(5);
+
+    postJson('/api/fiches-techniques', [
+        'produit_id' => $produit->id,
+        'lignes_matieres' => [['matiere_premiere_id' => $matiere->id, 'quantite' => 3]],
+        'etapes' => [
+            ['description' => 'Désosser le poulet.', 'duree_minutes' => 10],
+            ['description' => 'Mariner au piment vert.', 'duree_minutes' => 120],
+            ['description' => 'Dresser avec l\'attiéké.'],
+        ],
+        'materiels' => ['Braisière', 'Sonde'],
+        'points_critiques' => [
+            ['type' => 'cuisson', 'description' => 'Cuisson à cœur : 74 °C.'],
+            ['type' => 'allergene', 'description' => 'Arachide dans la marinade.'],
+        ],
+    ])
+        ->assertCreated()
+        ->assertJsonCount(3, 'data.etapes')
+        ->assertJsonCount(2, 'data.materiels')
+        ->assertJsonCount(2, 'data.points_critiques')
+        ->assertJsonPath('data.points_critiques.0.type_libelle', 'Cuisson')
+        ->assertJsonPath('data.materiels.0.libelle', 'Braisière');
+});
+
+/**
+ * L'ordre vient de la POSITION dans le tableau, jamais d'un champ envoyé par le
+ * client : deux étapes au même rang rendraient la fiche imprimée non
+ * déterministe, et un intérimaire ferait mariner après avoir servi.
+ */
+it('numérote les étapes dans l\'ordre reçu', function () {
+    actingAsFicheUser(['fichetechnique.create']);
+    $produit = Produit::factory()->create();
+    $matiere = matiereAvecCoutCatalogue(5);
+
+    $reponse = postJson('/api/fiches-techniques', [
+        'produit_id' => $produit->id,
+        'lignes_matieres' => [['matiere_premiere_id' => $matiere->id, 'quantite' => 1]],
+        'etapes' => [
+            ['description' => 'Première'],
+            ['description' => 'Deuxième'],
+            ['description' => 'Troisième'],
+        ],
+    ])->assertCreated();
+
+    expect($reponse->json('data.etapes.*.ordre'))->toBe([1, 2, 3])
+        ->and($reponse->json('data.etapes.*.description'))
+        ->toBe(['Première', 'Deuxième', 'Troisième']);
+});
+
+/**
+ * La durée cumulée ne compte que les étapes chiffrées. `null` quand aucune ne
+ * l'est : annoncer « 0 min » sur une recette non chiffrée serait un mensonge.
+ */
+it('cumule les durées, et ne dit rien quand aucune n\'est chiffrée', function () {
+    actingAsFicheUser(['fichetechnique.create']);
+    $produit = Produit::factory()->create();
+    $matiere = matiereAvecCoutCatalogue(5);
+
+    postJson('/api/fiches-techniques', [
+        'produit_id' => $produit->id,
+        'lignes_matieres' => [['matiere_premiere_id' => $matiere->id, 'quantite' => 1]],
+        'etapes' => [
+            ['description' => 'Cuire', 'duree_minutes' => 25],
+            ['description' => 'Reposer', 'duree_minutes' => 5],
+            ['description' => 'Dresser'],
+        ],
+    ])
+        ->assertCreated()
+        ->assertJsonPath('data.duree_totale_minutes', 30);
+
+    postJson('/api/fiches-techniques', [
+        'produit_id' => Produit::factory()->create()->id,
+        'lignes_matieres' => [['matiere_premiere_id' => $matiere->id, 'quantite' => 1]],
+        'etapes' => [['description' => 'Assembler']],
+    ])
+        ->assertCreated()
+        ->assertJsonPath('data.duree_totale_minutes', null);
+});
+
+/**
+ * La méthodologie appartient à SA version. Sans recopie, la nouvelle version
+ * naîtrait sans mode opératoire ; sans isolation, corriger une étape
+ * réécrirait la recette de plats déjà vendus (cf. versioning).
+ */
+it('recopie la méthodologie sur la nouvelle version, sans toucher à l\'archivée', function () {
+    actingAsFicheUser(['fichetechnique.create', 'fichetechnique.update']);
+    $produit = Produit::factory()->create();
+    $matiere = matiereAvecCoutCatalogue(5);
+
+    $v1 = postJson('/api/fiches-techniques', [
+        'produit_id' => $produit->id,
+        'lignes_matieres' => [['matiere_premiere_id' => $matiere->id, 'quantite' => 1]],
+        'etapes' => [['description' => 'Étape v1', 'duree_minutes' => 10]],
+        'points_critiques' => [['type' => 'cuisson', 'description' => '74 °C']],
+    ])->assertCreated()->json('data.id');
+
+    putJson("/api/fiches-techniques/{$v1}", [
+        'produit_id' => $produit->id,
+        'lignes_matieres' => [['matiere_premiere_id' => $matiere->id, 'quantite' => 2]],
+        'etapes' => [
+            ['description' => 'Étape v2', 'duree_minutes' => 15],
+            ['description' => 'Nouvelle étape'],
+        ],
+        'points_critiques' => [['type' => 'allergene', 'description' => 'Arachide']],
+    ])
+        ->assertOk()
+        ->assertJsonPath('data.version', 2)
+        ->assertJsonCount(2, 'data.etapes')
+        ->assertJsonPath('data.etapes.0.description', 'Étape v2')
+        ->assertJsonPath('data.points_critiques.0.type', 'allergene');
+
+    $archivee = FicheTechnique::find($v1);
+    expect($archivee->statut)->toBe(StatutFicheTechnique::Archivee)
+        ->and($archivee->etapes)->toHaveCount(1)
+        ->and($archivee->etapes->first()->description)->toBe('Étape v1')
+        ->and($archivee->pointsCritiques->first()->type->value)->toBe('cuisson');
+});
+
+it('refuse un type de point critique inconnu (422)', function () {
+    // Liste fermée : un contrôle qui ne distingue pas un allergène d'une
+    // température de cuisson ne contrôle rien.
+    actingAsFicheUser(['fichetechnique.create']);
+    $matiere = matiereAvecCoutCatalogue(5);
+
+    postJson('/api/fiches-techniques', [
+        'produit_id' => Produit::factory()->create()->id,
+        'lignes_matieres' => [['matiere_premiere_id' => $matiere->id, 'quantite' => 1]],
+        'points_critiques' => [['type' => 'important', 'description' => 'Bien surveiller']],
+    ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('points_critiques.0.type');
+});
+
+it('refuse deux fois le même matériel (422)', function () {
+    actingAsFicheUser(['fichetechnique.create']);
+    $matiere = matiereAvecCoutCatalogue(5);
+
+    postJson('/api/fiches-techniques', [
+        'produit_id' => Produit::factory()->create()->id,
+        'lignes_matieres' => [['matiere_premiere_id' => $matiere->id, 'quantite' => 1]],
+        'materiels' => ['Braisière', 'Braisière'],
+    ])->assertStatus(422);
+});
+
+it('reste créable sans aucune méthodologie', function () {
+    // Les fiches existantes n'en ont pas : la rendre obligatoire les casserait
+    // toutes, et un plat d'assemblage n'a pas de mode opératoire.
+    actingAsFicheUser(['fichetechnique.create']);
+    $matiere = matiereAvecCoutCatalogue(5);
+
+    postJson('/api/fiches-techniques', [
+        'produit_id' => Produit::factory()->create()->id,
+        'lignes_matieres' => [['matiere_premiere_id' => $matiere->id, 'quantite' => 1]],
+    ])
+        ->assertCreated()
+        ->assertJsonCount(0, 'data.etapes')
+        ->assertJsonPath('data.duree_totale_minutes', null);
 });
