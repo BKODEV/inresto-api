@@ -31,7 +31,7 @@
 
 ## État global
 
-- **644 tests API verts**, **186 tests front verts**, builds propres, Pint et
+- **673 tests API verts**, **215 tests front verts**, builds propres, Pint et
   Prettier clean.
 - **Travail en cours sur la branche `feat/pass-cuisine`**, dans les **deux**
   dépôts, **ni fusionnée ni poussée** :
@@ -43,7 +43,9 @@
     budgets & dépenses.
   - **Stock** : `StockService` (PMP), inventaires, lecture par site et journal
     des mouvements.
-  - **Recettes** : sous-recettes, fiches techniques versionnées.
+  - **Recettes** : sous-recettes, fiches techniques versionnées, **méthodologie**
+    (étapes ordonnées, matériel, points critiques) versionnée avec la fiche et
+    imprimée sur le PDF.
   - **Salle / vente** : produits & cartes, tables (archivage réversible, création
     en lot), commandes client **servies par tours**, KDS adossé aux **lignes**,
     déstockage, remises / annulations.
@@ -64,6 +66,9 @@
     `annulation.view`.
   - **Postes de production cuisine** : `postes_cuisine` + catégories associées,
     filtre `poste_cuisine_id` sur le KDS, écran Pass.
+  - **Services de cuisine** : `sessions_cuisine` par point de vente, brigade en
+    pivot, rattachement des lignes à l'envoi, rapport de production. Onglet
+    « Cuisine » du poste de caisse.
   - **Menu public par QR** : jeton **par table**, seul périmètre non authentifié.
   - **PDF** : bon de commande, fiche technique, facture A4, **addition et reçu**
     (un gabarit 80mm à deux états), rapport de fermeture, planches QR.
@@ -126,7 +131,10 @@ décisions transverses dans les **mémoires**. À retenir en tête :
    l'écran « Mes pourboires » existe mais reste invisible tant que la direction
    ne l'accorde pas. `session_caisse.forcer_fermeture` est allée au **gérant**,
    pas au caissier.
-3. Après un déploiement, enchaîner **les deux** seeders :
+3. **Nouvelles permissions** à semer : `session_cuisine.view|ouvrir|fermer`
+   (chef-cuisine les trois, gérant la lecture seule). Elles sont dans
+   `PermissionCatalog` et `RoleSeeder` — donc couvertes par le point suivant.
+4. Après un déploiement, enchaîner **les deux** seeders :
    `db:seed --class=PermissionSeeder` (enregistre les permissions) puis
    `db:seed --class=RoleSeeder` (les attribue aux rôles système).
    ⚠️ **`RoleSeeder` fait un `syncPermissions`** : il **REMPLACE** le jeu de
@@ -138,45 +146,45 @@ décisions transverses dans les **mémoires**. À retenir en tête :
 
 ### Prérequis déploiement
 
-4. `php artisan migrate` puis `php artisan storage:link` (logos **et** photos).
-5. **php.ini prod** : `post_max_size` = `upload_max_filesize` = **8M** (sinon
+5. `php artisan migrate` puis `php artisan storage:link` (logos **et** photos).
+6. **php.ini prod** : `post_max_size` = `upload_max_filesize` = **8M** (sinon
    upload logo coupé au *Request Startup*, avant Laravel).
-6. **`FRONTEND_URL` doit pointer sur le front**, jamais sur l'API. Elle sert aux
+7. **`FRONTEND_URL` doit pointer sur le front**, jamais sur l'API. Elle sert aux
    liens de réinitialisation de mot de passe **et** aux QR de table
    (`PUBLIC_MENU_BASE_URL` → `FRONTEND_URL` → `APP_URL`). Absente, la chaîne de
    repli tombait sur `APP_URL` et les QR menaient à un 404 sur l'API — c'était le
    cas en dev jusqu'à aujourd'hui. Elle figure maintenant dans `.env.example`.
    **Les QR déjà imprimés portent l'ancienne URL et sont à réimprimer.**
-7. **SMTP** configuré (reset mots de passe).
-8. Avant d'appliquer le périmètre en prod, vérifier qu'aucun compte n'est
+8. **SMTP** configuré (reset mots de passe).
+9. Avant d'appliquer le périmètre en prod, vérifier qu'aucun compte n'est
    orphelin : `User::doesntHave('sites')->count()` doit valoir 0.
 
 ### Pièges techniques rencontrés (à ne pas redécouvrir)
 
-9. **SQLite reconstruit la table dès qu'on ajoute une clé étrangère**, et la
+10. **SQLite reconstruit la table dès qu'on ajoute une clé étrangère**, et la
    reconstruction **perd silencieusement les index partiels et les contraintes
    CHECK**. Deux fois le cas cette session (index « une seule session ouverte »,
    contrainte `destination` des versements). Toute migration qui ajoute une FK
    doit **reposer explicitement** ce qu'elle risque d'emporter. Corollaire : les
    tests peuvent être verts pendant que PostgreSQL rejette — **vérifier sur la
    vraie base**.
-10. **`enum()->change()` produit du SQL invalide sur PostgreSQL.** Utiliser une
+11. **`enum()->change()` produit du SQL invalide sur PostgreSQL.** Utiliser une
     branche pgsql explicite (`ALTER COLUMN … TYPE` + `ADD CONSTRAINT`), ou
     convertir la colonne en `string` et laisser l'enum PHP faire la loi.
-11. **Toute migration se valide par `migrate:rollback` puis re-migrate sur
+12. **Toute migration se valide par `migrate:rollback` puis re-migrate sur
     PostgreSQL**, pas seulement à l'aller.
-12. **Budget de style Angular : 8 kB par composant.** Dépassé trois fois cette
+13. **Budget de style Angular : 8 kB par composant.** Dépassé trois fois cette
     session ; la parade est d'extraire les blocs partagés dans un `.scss`
     voisin (`reglement.scss`, `caisse.page.scss`).
-13. **Convention de test API** : chaque fichier définit son propre helper
+14. **Convention de test API** : chaque fichier définit son propre helper
     `actingAs…`. Réutiliser un nom déjà pris provoque une **erreur fatale PHP**
     (redéclaration) — la suite sort en code 255 **sans aucune sortie**, alors que
     chaque fichier passe isolément.
-14. `caisse.layout.spec.ts` laisse passer **2 « unhandled rejections »** du
+15. `caisse.layout.spec.ts` laisse passer **2 « unhandled rejections »** du
     routeur Angular (`NG04002` sur `vente/caisse/ventes` et `…/pourboires`) : le
     test ne déclare pas ces routes. La suite passe, mais Vitest prévient à juste
     titre que ce genre de bruit peut masquer un faux positif — à nettoyer.
-15. **Un écran peut être entièrement codé et rester inatteignable.** Le tiroir de
+16. **Un écran peut être entièrement codé et rester inatteignable.** Le tiroir de
     versement, `openVerser()` et ses tests unitaires existaient depuis des
     semaines : aucun élément du gabarit ne l'appelait. Un test de *classe* ne
     voit pas ce trou — il faut un test de **rendu** (`TestBed.createComponent`).
@@ -185,12 +193,17 @@ décisions transverses dans les **mémoires**. À retenir en tête :
 
 ### Dettes connues
 
-16. **Le site `PRINCIPAL` n'a pas forcément de fiche d'établissement** : tout PDF
+17. **Le site `PRINCIPAL` n'a pas forcément de fiche d'établissement** : tout PDF
     passant par le repli sortira sans en-tête.
-17. **Périmètre non appliqué sur `points_de_vente` et `parametre_etablissement`**,
+18. **Périmètre non appliqué sur `points_de_vente` et `parametre_etablissement`**,
     qui portent pourtant un `site_id`. Écrans réservés à des rôles
     administratifs, donc enjeu moindre — mais ils restent hors de la frontière.
-18. **Carte** : index unique partiel « une seule carte active par PDV » resté
+19. **`tests/Feature/CommandeClientTest.php` « KDS : restreint la file au poste »
+    est INSTABLE** (≈1 échec sur 3 exécutions de la suite complète) : les deux
+    lignes sont créées avec `envoyee_le = now()` et le KDS groupe les tours par
+    horodatage ISO — à cheval sur une seconde, elles forment deux tours au lieu
+    d'un. Une seconde figée le règle.
+20. **Carte** : index unique partiel « une seule carte active par PDV » resté
     app-level (`UpdateCarteRequest`). Pas urgent.
 
 ## Mémoires liées (décisions structurantes)

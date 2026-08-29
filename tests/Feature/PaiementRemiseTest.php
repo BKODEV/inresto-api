@@ -539,3 +539,17 @@ it('borne les remises au périmètre de sites', function () {
         ->assertJsonCount(1, 'data.remises')
         ->assertJsonPath('data.remises.0.motif', 'la mienne');
 });
+
+it('nomme qui a accordé la remise et situe la note', function () {
+    // Un écran de contrôle cherche une personne et une table, pas deux
+    // identifiants à recouper à la main.
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['remise.view']);
+    $commande = commandeSur($ctx, $user);
+    Remise::factory()->create(['commande_client_id' => $commande->id, 'user_id' => $user->id]);
+
+    getJson('/api/remises')
+        ->assertOk()
+        ->assertJsonPath('data.remises.0.auteur', trim($user->prenom.' '.$user->nom))
+        ->assertJsonPath('data.remises.0.table_numero', $commande->table_numero);
+});

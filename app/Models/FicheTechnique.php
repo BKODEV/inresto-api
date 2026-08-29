@@ -61,6 +61,36 @@ class FicheTechnique extends Model
         return $this->hasMany(LigneFicheTechniqueSousRecette::class);
     }
 
+    /** La méthodologie : comment on produit le plat, dans l'ordre. */
+    public function etapes(): HasMany
+    {
+        return $this->hasMany(EtapeFicheTechnique::class)->orderBy('ordre');
+    }
+
+    public function materiels(): HasMany
+    {
+        return $this->hasMany(MaterielFicheTechnique::class)->orderBy('ordre');
+    }
+
+    public function pointsCritiques(): HasMany
+    {
+        return $this->hasMany(PointCritiqueFicheTechnique::class)->orderBy('ordre');
+    }
+
+    /**
+     * Durée totale annoncée par les étapes qui en portent une, en minutes.
+     *
+     * `null` si aucune étape n'est chiffrée : annoncer « 0 min » sur une recette
+     * dont personne n'a renseigné les durées serait un mensonge utile à
+     * personne.
+     */
+    public function dureeTotaleMinutes(): ?int
+    {
+        $durees = $this->etapes->pluck('duree_minutes')->filter(fn (?int $d): bool => $d !== null);
+
+        return $durees->isEmpty() ? null : (int) $durees->sum();
+    }
+
     public function estActive(): bool
     {
         return $this->statut === StatutFicheTechnique::Active;

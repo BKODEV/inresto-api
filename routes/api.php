@@ -40,6 +40,7 @@ use App\Http\Controllers\Api\Reporting\StockController as ReportingStockControll
 use App\Http\Controllers\Api\Reporting\VentesController as ReportingVentesController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SessionCaisseController;
+use App\Http\Controllers\Api\SessionCuisineController;
 use App\Http\Controllers\Api\SiteController;
 use App\Http\Controllers\Api\SousRecetteController;
 use App\Http\Controllers\Api\StockController;
@@ -242,6 +243,22 @@ Route::middleware('auth:sanctum')->group(function () {
     // Le pendant salle du KDS : ce qui est prêt et attend d'être emporté.
     Route::get('pass/{point_de_vente}', [CommandeClientController::class, 'pass'])
         ->name('pass.index');
+
+    // Services de cuisine — le pendant brigade de la session de caisse, et
+    // INDÉPENDANT d'elle : un point de vente porte plusieurs caisses pour une
+    // seule cuisine, et la brigade travaille avant la première ouverture de
+    // caisse comme après la dernière fermeture.
+    Route::get('sessions-cuisine', [SessionCuisineController::class, 'index'])
+        ->name('sessions-cuisine.index');
+    Route::post('sessions-cuisine', [SessionCuisineController::class, 'store'])
+        ->name('sessions-cuisine.store');
+    Route::get('sessions-cuisine/{session_cuisine}', [SessionCuisineController::class, 'show'])
+        ->name('sessions-cuisine.show');
+    Route::post('sessions-cuisine/{session_cuisine}/fermer', [SessionCuisineController::class, 'fermer'])
+        ->name('sessions-cuisine.fermer');
+    // Ce que la brigade a produit : la raison d'être du module.
+    Route::get('sessions-cuisine/{session_cuisine}/production', [SessionCuisineController::class, 'production'])
+        ->name('sessions-cuisine.production');
 
     // Module Salle — Lot C-2 : paiements, remises, annulations.
     Route::post('commandes-client/{commande}/paiements', [PaiementController::class, 'store'])

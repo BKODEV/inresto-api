@@ -17,8 +17,10 @@
 - [Définitions partagées vs opérations rattachées au site](#définitions-partagées-vs-opérations-rattachées-au-site)
 - [Utilisateurs, rôles & permissions](#utilisateurs-rôles--permissions)
 - [Versioning des fiches techniques](#versioning-des-fiches-techniques)
+- [La méthodologie fait partie de la fiche](#la-méthodologie-fait-partie-de-la-fiche)
 - [Prix de vente porté par la carte, pas par le produit](#prix-de-vente-porté-par-la-carte-pas-par-le-produit)
 - [Une seule session de caisse ouverte par caisse](#une-seule-session-de-caisse-ouverte-par-caisse)
+- [Le service de cuisine, indépendant de la caisse](#le-service-de-cuisine-indépendant-de-la-caisse)
 - [Déstockage à la vente : au service, jamais bloquant](#déstockage-à-la-vente--au-service-jamais-bloquant)
 - [Encaissement, remises encadrées & annulations](#encaissement-remises-encadrées--annulations)
 - [Un mode de paiement est un contenant](#un-mode-de-paiement-est-un-contenant)
@@ -602,6 +604,45 @@ l'utilisent) ne touche que les versions actives.
 
 ---
 
+## La méthodologie fait partie de la fiche
+
+### Règle d'or
+
+Une fiche technique porte **comment on produit le plat**, pas seulement ce qu'il
+coûte : **étapes** ordonnées (avec une durée facultative), **matériel** et
+**points critiques**. Les trois sont **versionnés avec la fiche**, comme le coût.
+
+> **Pourquoi ?** Une fiche qui liste les matières sans dire quoi en faire n'est
+> pas exécutable : un extra tient la liste des courses, pas la recette. C'est le
+> jour où on embauche pour un service qu'on découvre ce qui manquait.
+
+### L'ordre vient de la position, jamais du client
+
+Le tableau reçu **est** l'ordre : le serveur numérote d'après la position, il n'y
+a aucun champ `ordre` au contrat. Deux étapes au même rang rendraient la fiche
+imprimée non déterministe — et un intérimaire ferait mariner après avoir servi.
+Réordonner, côté écran, est un déplacement de ligne.
+
+### Les points critiques ne sont pas des étapes
+
+Une étape se lit une fois, en séquence. Un **point critique** — cuisson à cœur,
+allergène, chaîne du froid — doit rester visible pendant **toute** la production.
+D'où une table à part, un enum fermé (`TypePointCritique`), et une position **en
+tête** du bloc méthodologie sur le PDF.
+
+### Ce qui reste facultatif, et pourquoi
+
+| Élément | Facultatif | Raison |
+|---|---|---|
+| Toute la méthodologie | oui | Les fiches existantes n'en ont pas, et un plat d'assemblage n'a pas de mode opératoire. L'exiger casserait la saisie. |
+| `duree_minutes` d'une étape | oui | « Laisser reposer » n'a pas toujours une durée qu'on veuille chiffrer ; un `0` imposé se lirait comme « instantané ». |
+
+`duree_totale_minutes` ne somme que les étapes **chiffrées**, et vaut `null`
+quand aucune ne l'est — annoncer « 0 min » sur une recette non chiffrée serait un
+mensonge utile à personne.
+
+---
+
 ## Prix de vente porté par la carte, pas par le produit
 
 ### Règle d'or
@@ -665,6 +706,56 @@ ne peut pas en ouvrir une seconde sur la **même** caisse (409).
 - L'accès « utiliser une session » (créer des commandes dessus, Lot C) se remonte
   via **caisse → point de vente → site**, croisé avec `user_site` et la permission
   `session_caisse.utiliser`.
+
+---
+
+## Le service de cuisine, indépendant de la caisse
+
+### Règle d'or
+
+La brigade a **son propre service** (`sessions_cuisine`), rattaché au **point de
+vente** et **jamais ouvert ni fermé par la caisse**. Une ligne s'y rattache au
+moment où elle **part en cuisine** (`envoyee_le`).
+
+> **Pourquoi ce qu'il apporte ?** Les ventes disent quel **serveur** a vendu un
+> plat. Elles ne disent jamais quelle **équipe** l'a produit. C'est la seule
+> question à laquelle ce module répond.
+
+### Pourquoi indépendant, et pas ouvert par la caisse
+
+Trois raisons, dans l'ordre où elles mordent :
+
+1. Un point de vente porte **plusieurs caisses pour une seule cuisine** : coupler
+   obligerait à désigner arbitrairement laquelle commande le service.
+2. La brigade travaille **avant** la première ouverture de caisse (mise en place)
+   et **après** la dernière fermeture (nettoyage). Ces heures disparaîtraient du
+   suivi.
+3. Une caisse fermée par erreur **fermerait la cuisine en plein service**.
+
+Même garde-fou que la caisse en revanche : **un seul service ouvert par point de
+vente**, index unique partiel en base, pour la même raison — deux services
+ouverts rendraient le rattachement des lignes ambigu.
+
+### La brigade est un pivot, pas une colonne
+
+`ouvert_par` dit qui a tourné la clé ; `session_cuisine_user` dit **qui a tenu le
+service**. Le chef ouvre, trois commis produisent. Qui ouvre est ajouté d'office à
+l'équipe, et l'équipe se **corrige à la fermeture** — c'est là qu'on sait qui a
+réellement travaillé, remplacements compris.
+
+### Deux règles qui suivent le principe « rien ne bloque un service »
+
+- **Aucun service ouvert ⇒ le tour part quand même**, simplement sans être imputé
+  à une équipe. Un oubli de la brigade n'a pas à immobiliser la salle.
+- **La fermeture est refusée (409) tant que des plats envoyés ne sont pas
+  annoncés au pass.** Les laisser rattachés à un service clos les ferait
+  disparaître de la file, sans que personne ne les termine.
+
+### Production
+
+`GET /sessions-cuisine/{id}/production` agrège **par produit** : quantité et CA,
+adossés aux **lignes** comme tout le reporting. Les lignes annulées en sont
+exclues — la brigade les a préparées, mais elles n'ont rien vendu.
 
 ---
 

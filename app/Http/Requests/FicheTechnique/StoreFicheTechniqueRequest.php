@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\FicheTechnique;
 
+use App\Enums\TypePointCritique;
 use App\Models\FicheTechnique;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Contracts\Validation\Validator;
@@ -45,6 +46,22 @@ class StoreFicheTechniqueRequest extends FormRequest
                 'exists:sous_recettes,id',
             ],
             'lignes_sous_recettes.*.quantite' => ['required', 'numeric', 'gt:0'],
+
+            // Méthodologie. Pas d'`ordre` au contrat : il vient de la position
+            // dans le tableau, sinon deux lignes au même rang rendraient la
+            // fiche imprimée non déterministe.
+            'etapes' => ['sometimes', 'array', 'max:50'],
+            'etapes.*.description' => ['required', 'string', 'max:1000'],
+            // Bornée à 24 h : au-delà, c'est une durée de maturation qui relève
+            // d'une note, pas d'un minuteur qu'on suit pendant un service.
+            'etapes.*.duree_minutes' => ['nullable', 'integer', 'min:1', 'max:1440'],
+
+            'materiels' => ['sometimes', 'array', 'max:30'],
+            'materiels.*' => ['required', 'string', 'max:120', 'distinct'],
+
+            'points_critiques' => ['sometimes', 'array', 'max:20'],
+            'points_critiques.*.type' => ['required', Rule::enum(TypePointCritique::class)],
+            'points_critiques.*.description' => ['required', 'string', 'max:500'],
         ];
     }
 
@@ -74,6 +91,8 @@ class StoreFicheTechniqueRequest extends FormRequest
         return [
             'lignes_matieres.*.matiere_premiere_id.distinct' => 'Une matière première ne peut apparaître qu\'une fois.',
             'lignes_sous_recettes.*.sous_recette_id.distinct' => 'Une sous-recette ne peut apparaître qu\'une fois.',
+            'materiels.*.distinct' => 'Ce matériel est déjà listé.',
+            'points_critiques.*.type.Illuminate\\Validation\\Rules\\Enum' => 'Type de point critique inconnu.',
         ];
     }
 }

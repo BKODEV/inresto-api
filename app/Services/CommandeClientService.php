@@ -35,6 +35,7 @@ class CommandeClientService
     public function __construct(
         private readonly StockService $stock,
         private readonly TableSalleService $tables,
+        private readonly SessionCuisineService $sessionsCuisine,
     ) {}
 
     /**
@@ -171,8 +172,20 @@ class CommandeClientService
             }
 
             $tour = now();
+            // Le service de cuisine ouvert sur le point de vente de la table.
+            // `null` est licite et ne bloque rien : la cuisine peut tourner sans
+            // que personne ait ouvert son service, et refuser l'envoi
+            // immobiliserait la salle pour un oubli de la brigade. La ligne part
+            // alors sans être imputée à une équipe — signaler vaut mieux
+            // qu'empêcher de servir.
+            $commande->loadMissing('table');
+            $sessionCuisine = $commande->table === null
+                ? null
+                : $this->sessionsCuisine->sessionOuvertePour((int) $commande->table->point_de_vente_id);
+
             foreach ($enAttente as $ligne) {
                 $ligne->envoyee_le = $tour;
+                $ligne->session_cuisine_id = $sessionCuisine?->id;
                 $ligne->save();
             }
 

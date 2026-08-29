@@ -79,4 +79,68 @@
             <td class="num" style="width: 180px;">{{ Devise::formater((float) $fiche->cout_matiere, $devise) }}</td>
         </tr>
     </table>
+
+    {{--
+        La méthodologie vient APRÈS le coût : la fiche sert d'abord à chiffrer un
+        plat, et c'est la partie qu'on emporte à l'atelier. Les points critiques
+        sont placés en tête de bloc, avant les étapes — on ne les lit pas une
+        fois, on les garde à l'œil pendant toute la production.
+    --}}
+    @if ($fiche->pointsCritiques->isNotEmpty() || $fiche->materiels->isNotEmpty() || $fiche->etapes->isNotEmpty())
+        <hr>
+        <h2>Méthodologie</h2>
+
+        @if ($fiche->materiels->isNotEmpty())
+            <div class="muted" style="margin-bottom: 8px;">
+                <strong>Matériel :</strong>
+                {{ $fiche->materiels->pluck('libelle')->implode(' · ') }}
+            </div>
+        @endif
+
+        @if ($fiche->pointsCritiques->isNotEmpty())
+            <table class="lignes">
+                <thead>
+                    <tr>
+                        <th colspan="2">Points critiques</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach ($fiche->pointsCritiques as $point)
+                        <tr>
+                            <td style="width: 140px;"><strong>{{ $point->type->libelle() }}</strong></td>
+                            <td>{{ $point->description }}</td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        @endif
+
+        @if ($fiche->etapes->isNotEmpty())
+            @php $dureeTotale = $fiche->dureeTotaleMinutes(); @endphp
+            <table class="lignes">
+                <thead>
+                    <tr>
+                        <th style="width: 32px;">#</th>
+                        <th>Étape</th>
+                        <th class="num" style="width: 90px;">Durée</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach ($fiche->etapes as $etape)
+                        <tr>
+                            <td>{{ $etape->ordre }}</td>
+                            <td>{{ $etape->description }}</td>
+                            {{-- Une étape sans durée n'affiche rien : « 0 min » se
+                                 lirait comme un geste instantané. --}}
+                            <td class="num">{{ $etape->duree_minutes ? $etape->duree_minutes . ' min' : '—' }}</td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+
+            @if ($dureeTotale !== null)
+                <div class="muted">Durée cumulée des étapes chiffrées : {{ $dureeTotale }} min</div>
+            @endif
+        @endif
+    @endif
 @endsection

@@ -294,3 +294,30 @@ it('borne au périmètre de sites, ligne comme commande', function () {
         ->assertJsonCount(1, 'data.annulations')
         ->assertJsonPath('data.annulations.0.motif', 'la mienne');
 });
+
+it('remonte à la note, qu\'on ait annulé la commande ou l\'une de ses lignes', function () {
+    // Les deux natures d'annulation doivent mener au même endroit : sans cela,
+    // la moitié des lignes du contrôle est un cul-de-sac.
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['annulation.view']);
+    $commande = commandeSur($ctx, $user);
+    $ligne = LigneCommandeClient::factory()->create([
+        'commande_client_id' => $commande->id,
+        'produit_id' => produitSurCarte($ctx)->id,
+    ]);
+
+    Annulation::factory()->create([
+        'annulable_type' => 'commandes_client', 'annulable_id' => $commande->id,
+        'user_id' => $user->id, 'date_heure' => now()->subMinute(),
+    ]);
+    Annulation::factory()->create([
+        'annulable_type' => 'lignes_commande_client', 'annulable_id' => $ligne->id,
+        'user_id' => $user->id, 'date_heure' => now(),
+    ]);
+
+    getJson('/api/annulations')
+        ->assertOk()
+        ->assertJsonPath('data.annulations.0.commande_client_id', $commande->id)
+        ->assertJsonPath('data.annulations.1.commande_client_id', $commande->id)
+        ->assertJsonPath('data.annulations.0.auteur', trim($user->prenom.' '.$user->nom));
+});

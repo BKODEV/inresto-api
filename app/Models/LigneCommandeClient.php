@@ -49,6 +49,16 @@ class LigneCommandeClient extends Model
         return $this->belongsTo(CommandeClient::class, 'commande_client_id');
     }
 
+    /**
+     * Le service de cuisine qui a produit cette ligne. Posé à l'envoi, jamais à
+     * la création : une ligne au brouillon n'a été produite par personne. Nul
+     * quand aucun service n'était ouvert — la salle n'attend pas la brigade.
+     */
+    public function sessionCuisine(): BelongsTo
+    {
+        return $this->belongsTo(SessionCuisine::class, 'session_cuisine_id');
+    }
+
     public function produit(): BelongsTo
     {
         return $this->belongsTo(Produit::class);

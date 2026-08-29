@@ -73,6 +73,10 @@ class RoleSeeder extends Seeder
                     ...$this->crud('commande_client'), 'commande_client.encaisser',
                     'commande_client.marquer_pret',
                     ...$this->crud('poste_cuisine'),
+                    // Le gérant lit les services de cuisine (qui a produit quoi)
+                    // sans avoir à les ouvrir ni les fermer : c'est le métier du
+                    // chef, pas le sien.
+                    'session_cuisine.view',
                     'paiement.view', 'paiement.create',
                     'versement.view', 'versement.create',
                     'remise.view', 'remise.create', 'remise.autoriser_au_dela_seuil',
@@ -113,6 +117,10 @@ class RoleSeeder extends Seeder
                     // Organiser sa brigade est le métier du chef, pas une
                     // question de paramétrage commercial.
                     ...$this->crud('poste_cuisine'),
+                    // Le service de la brigade, ouvert à la mise en place et
+                    // clos après le nettoyage. Le chef le tient de bout en
+                    // bout : c'est la fermeture qui fige ce qu'on a produit.
+                    'session_cuisine.view', 'session_cuisine.ouvrir', 'session_cuisine.fermer',
                     'reporting.food_cost', 'reporting.stock',
                 ],
             ],
