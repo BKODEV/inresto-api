@@ -31,7 +31,7 @@
 
 ## État global
 
-- **684 tests API verts**, **229 tests front verts**, builds propres, Pint et
+- **684 tests API verts**, **231 tests front verts**, builds propres, Pint et
   Prettier clean.
 - **Travail en cours sur la branche `feat/pass-cuisine`**, dans les **deux**
   dépôts, **ni fusionnée ni poussée** :
@@ -125,6 +125,14 @@ décisions transverses dans les **mémoires**. À retenir en tête :
 ## Points d'attention
 
 ### Paramétrage à faire dans l'application
+
+0. **Compte de l'écran mural de cuisine**, à créer à la main : un rôle
+   `ecran-cuisine` portant EXACTEMENT `commande_client.view` et
+   `commande_client.marquer_pret`, puis un utilisateur « Écran cuisine — *PDV* »
+   rattaché à ce seul rôle et au site du point de vente. `RoleSeeder` ne touche
+   que les rôles qu'il déclare, donc ce rôle-là survit aux déploiements.
+   Ne PAS y ajouter `poste_cuisine.view` : le filtre par poste n'a pas de sens
+   sur un écran unique, et la permission ouvrirait l'écran des postes.
 
 1. **Modes de paiement** : la fermeture exige désormais qu'un compte soit saisi
    pour **chaque mode actif**. Il faut donc désactiver « Virements » et

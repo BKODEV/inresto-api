@@ -576,6 +576,41 @@ Corollaire : une entrée de menu doit porter la **même permission que l'API**
 derrière elle. Un refus doit se voir avant le clic, et se lire comme un refus —
 pas comme une panne de chargement.
 
+### Un écran mural se connecte avec un compte d'APPAREIL
+
+L'écran de cuisine est une tablette fixée au mur, sans propriétaire : qui passe
+devant dispose de tout ce que le compte connecté peut faire — y compris en
+ouvrant un autre onglet, le jeton valant pour toute l'API.
+
+D'où un compte dédié, au strict minimum : **exactement** `commande_client.view`
+(lire la file) et `commande_client.marquer_pret` (annoncer, et défaire
+l'annonce). Rien d'autre : ni session, ni caisse, ni stock, ni paramétrage.
+
+> **« Tout le monde peut alors taper prêt »** — et c'est sans conséquence :
+> `marquerPret` n'écrit que `prete_le`, **sans auteur**. C'est une sonnette, pas
+> une signature. Le geste est réversible par la même permission, et
+> l'attribution existe au bon niveau — la **brigade** du service de cuisine, qui
+> est la seule granularité honnête pour un écran tapé par qui est le plus près.
+
+Le compte d'appareil ne porte **pas** `poste_cuisine.view` : le filtre par poste
+n'a pas de sens sur l'écran unique d'une cuisine, et cette permission ouvrirait
+au passage l'écran des postes de production.
+
+**Corollaire sur l'atterrissage** : les écrans hors shell passent en second dans
+`premiereRouteAutorisee`, mais deviennent la destination quand ils sont les
+**seuls** ouverts — sans quoi la tablette murale démarrerait à chaque fois sur
+`/dashboard`, qu'elle n'a pas le droit d'ouvrir.
+
+**Corollaire sur la prise de commande** : son entrée est gouvernée par
+`commande_client.create`, et non `.view`. La cuisine détient `.view` pour lire sa
+file ; l'y envoyer lui donnait une liste de notes sur laquelle elle ne peut rien.
+
+> Le pass, lui, n'est **pas** un appareil partagé : chaque serveur a sa tablette
+> et s'y connecte avec son compte. `commande_client.update` y est exactement son
+> métier, et le déstockage du service est signé — `servir()` transmet
+> l'utilisateur au `StockService`, donc le mouvement `sortie_vente` porte son
+> auteur.
+
 ### Le super-admin court-circuite tout
 
 Le `super-admin` **ignore** hiérarchie **et** périmètre (il gère tout, sur tous les
