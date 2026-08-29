@@ -558,6 +558,22 @@ l'envoyer vide est refusé).
 > site n'aurait accès à rien : il serait en 403 permanent sur le stock, les
 > inventaires, les réceptions et les budgets.
 
+### On ne dépose personne sur un écran qu'il ne peut pas ouvrir
+
+La racine `/`, la sortie de connexion et la route inconnue ne visent pas un
+écran en dur : elles résolvent la **première entrée de menu que l'utilisateur
+peut réellement ouvrir**, dans l'ordre du menu — qui est déjà l'ordre
+d'importance métier.
+
+> **Pourquoi ?** Elles pointaient toutes `/dashboard`, écran gouverné par
+> `reporting.dashboard`. Un caissier ou un cuisinier, qui ne l'ont pas,
+> atterrissaient à chaque connexion sur une page qui ne pouvait que refuser de
+> se charger.
+
+Corollaire : une entrée de menu doit porter la **même permission que l'API**
+derrière elle. Un refus doit se voir avant le clic, et se lire comme un refus —
+pas comme une panne de chargement.
+
 ### Le super-admin court-circuite tout
 
 Le `super-admin` **ignore** hiérarchie **et** périmètre (il gère tout, sur tous les
@@ -859,6 +875,22 @@ table polymorphe `annulations` (avec motif obligatoire). Annuler une **commande
 entière** n'est possible qu'avant le service (ouverte / envoyée en cuisine) et
 libère la table.
 
+### Relire les remises et les annulations
+
+`GET /api/remises` et `GET /api/annulations`, en **lecture seule**, paginées,
+sous `remise.view` et `annulation.view`. Filtres propres à chaque nature :
+`type` pour une remise, `sort` et `annulable_type` pour une annulation.
+
+> **Pourquoi en plus du journal ?** Le journal répond à « que s'est-il passé ce
+> soir » : il plafonne chaque source et mêle les natures. Ces listes répondent à
+> la question de contrôle, sur une période — combien a-t-on remis et sur quels
+> motifs ; ce qui a été annulé après service est-il reparti en stock ou passé en
+> perte.
+
+Le périmètre de sites suit l'objet annulé, et il y a **deux chemins** : une
+commande porte sa table, une **ligne** ne la porte que par sa commande. La
+requête traverse donc la relation polymorphe des deux façons.
+
 ---
 
 ## Un mode de paiement est un contenant
@@ -1071,6 +1103,19 @@ seconde : un caissier qui verse dans la foulée de sa clôture tombait entre les
 deux cas — ni retranché d'un théorique déjà figé, ni compté dans la transition.
 Le service, lui, sait sans ambiguïté si la session était ouverte.
 
+### Les sorties se lisent en face des sessions
+
+L'écran **Sessions de caisse** liste les cent dernières sorties de tiroir sous
+la table des sessions, avec leur moment (`en_service` / après fermeture), leur
+destination et le nom de qui a emporté l'argent.
+
+> **Pourquoi ?** C'est la moitié manquante de la lecture d'un écart. Un manquant
+> de 200 000 s'explique en une ligne quand le versement au coffre est affiché à
+> côté, et se cherche une heure quand il ne l'est pas.
+
+La liste et le geste partagent la même permission `versement.create` : voir
+sortir l'argent et le faire sortir relèvent du même niveau de confiance.
+
 ---
 
 ## La chaîne entre deux services
@@ -1207,6 +1252,18 @@ de lecture doit donc rester bornée — le contrôleur impose une plage de dates
 Lecture seule, sous **`journal.view`** : rien à créer ni à modifier, donc pas de
 `crud()` dans le catalogue de permissions.
 
+**Six sources, toutes filtrables** : `annulation`, `remise`, `paiement`,
+`encaissement`, `versement`, `impression`. Filtres complémentaires : plage de
+dates, site, et **point de vente** — un site porte plusieurs comptoirs, et une
+anomalie se cherche sur celui où elle a eu lieu.
+
+L'API renvoie avec les événements la **fenêtre réellement lue** (`periode`) et le
+**volume retenu** (`total`), et l'écran les affiche.
+
+> **Pourquoi ?** Sans dates fournies, la fenêtre est ramenée à la journée
+> courante, et chaque source est plafonnée. Taire ces deux bornes laisserait
+> prendre la table pour l'historique complet de la période.
+
 ---
 
 ## Machines à états — mémo transversal
@@ -1275,3 +1332,18 @@ figée** :
 
 Rapports disponibles : **ventes**, **food cost**, **stock**, **budget**, et un
 **tableau de bord** de synthèse transversale.
+
+### Deux lectures qui se demandent explicitement
+
+| Rapport | Paramètre | Ce qu'il ouvre |
+|---|---|---|
+| Ventes → produits | `ordre=asc\|desc`, croisé avec `tri=ca\|quantite` | le **flop** autant que le top : ce qu'on retire de la carte, pas seulement ce qui la porte |
+| Stock → écarts d'inventaire | `detail=true` | le **ligne à ligne** : quelles matières expliquent l'écart |
+
+> Le flop se lit **parmi ce qui s'est vendu** : la requête part des lignes
+> vendues, un produit à zéro vente n'a aucune ligne et n'y figure pas. L'écran le
+> dit, sans quoi on lit la liste comme celle des invendus.
+
+Le détail des écarts n'est **pas** demandé par défaut : sur une période large,
+c'est une ligne par matière comptée et par inventaire, pour une question qu'on
+ne pose qu'une fois l'écart repéré.

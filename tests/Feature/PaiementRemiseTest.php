@@ -7,8 +7,10 @@ use App\Enums\StatutTable;
 use App\Models\CommandeClient;
 use App\Models\LigneCommandeClient;
 use App\Models\ModeDePaiement;
+use App\Models\Remise;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
+use function Pest\Laravel\getJson;
 use function Pest\Laravel\postJson;
 
 uses(RefreshDatabase::class);
@@ -402,6 +404,40 @@ it('signe la clôture du nom de l\'encaisseur', function () {
         ->and($commande->fresh()->encaisse_le)->not->toBeNull();
 });
 
+/**
+ * `encaisse_par` était servi en identifiant : illisible sur un écran de caisse,
+ * là où c'est justement la piste d'audit qu'on vient chercher — le serveur a
+ * ouvert la note, le caissier l'a soldée, ce n'est pas toujours la même
+ * personne. Le nom accompagne donc l'identifiant, comme pour `serveur`.
+ */
+it('nomme le caissier qui a clôturé la note', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, [
+        'commande_client.encaisser', 'commande_client.view', 'paiement.create', 'session_caisse.utiliser',
+    ]);
+    $commande = commandeServieAvecLigne($ctx, $user, 100, 1);
+    $mode = ModeDePaiement::factory()->create();
+    postJson("/api/commandes-client/{$commande->id}/paiements", ['mode_de_paiement_id' => $mode->id, 'montant' => 100, 'montant_recu' => 100])->assertCreated();
+    postJson("/api/commandes-client/{$commande->id}/encaisser")->assertOk();
+
+    getJson("/api/commandes-client/{$commande->id}")
+        ->assertOk()
+        ->assertJsonPath('data.encaisse_par', $user->id)
+        ->assertJsonPath('data.encaisse_par_nom', trim($user->prenom.' '.$user->nom));
+});
+
+it('laisse le caissier vide tant que la note n\'est pas soldée', function () {
+    // Une note ouverte n'a pas été clôturée : afficher un nom serait mentir.
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['commande_client.view', 'session_caisse.utiliser']);
+    $commande = commandeSur($ctx, $user);
+
+    getJson("/api/commandes-client/{$commande->id}")
+        ->assertOk()
+        ->assertJsonPath('data.encaisse_par', null)
+        ->assertJsonPath('data.encaisse_par_nom', null);
+});
+
 // ───────────────────────── permissions ─────────────────────────
 
 it('refuse un paiement sans la permission paiement.create', function () {
@@ -414,4 +450,92 @@ it('refuse un paiement sans la permission paiement.create', function () {
         'mode_de_paiement_id' => $mode->id,
         'montant' => 10,
     ])->assertForbidden();
+});
+
+// ───────────────────────── relecture des remises (index) ─────────────────────
+
+/**
+ * `remise.view` figurait au catalogue et la policy portait déjà `viewAny` —
+ * sans route pour les consommer : l'accorder à un rôle n'ouvrait rien. Le
+ * journal montre une remise au fil du service ; cette liste répond à l'autre
+ * question, celle de fin de mois : combien a-t-on remis, par qui, sur quoi.
+ */
+it('liste les remises accordées, de la plus récente à la plus ancienne', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['remise.view']);
+    $commande = commandeSur($ctx, $user);
+
+    Remise::factory()->create([
+        'commande_client_id' => $commande->id, 'user_id' => $user->id,
+        'motif' => 'ancienne', 'date_heure' => now()->subHour(),
+    ]);
+    Remise::factory()->create([
+        'commande_client_id' => $commande->id, 'user_id' => $user->id,
+        'motif' => 'récente', 'date_heure' => now(),
+    ]);
+
+    getJson('/api/remises')
+        ->assertOk()
+        ->assertJsonCount(2, 'data.remises')
+        ->assertJsonPath('data.remises.0.motif', 'récente')
+        ->assertJsonPath('data.remises.1.motif', 'ancienne')
+        ->assertJsonPath('data.pagination.total', 2);
+});
+
+it('refuse la relecture sans la permission dédiée', function () {
+    // Accorder une remise et relire celles de la maison sont deux droits
+    // distincts : le second est un contrôle, le premier un geste de service.
+    $ctx = salleContext();
+    actingAsServeur($ctx->site, ['remise.create']);
+
+    getJson('/api/remises')->assertForbidden();
+});
+
+it('filtre sur le type de remise', function () {
+    $ctx = salleContext();
+    $user = actingAsServeur($ctx->site, ['remise.view']);
+    $commande = commandeSur($ctx, $user);
+
+    Remise::factory()->create(['commande_client_id' => $commande->id, 'user_id' => $user->id]);
+    Remise::factory()->montantFixe(500)->create([
+        'commande_client_id' => $commande->id, 'user_id' => $user->id,
+    ]);
+
+    getJson('/api/remises?type=montant_fixe')
+        ->assertOk()
+        ->assertJsonCount(1, 'data.remises')
+        ->assertJsonPath('data.remises.0.type', 'montant_fixe');
+});
+
+it('refuse un type de remise inconnu (422)', function () {
+    $ctx = salleContext();
+    actingAsServeur($ctx->site, ['remise.view']);
+
+    getJson('/api/remises?type=cadeau')
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('type');
+});
+
+/**
+ * Une remise n'a pas de site à elle : elle le tient de sa commande, par la
+ * table puis le point de vente. Le périmètre doit suivre ce chemin.
+ */
+it('borne les remises au périmètre de sites', function () {
+    $ctx = salleContext();
+    $autre = salleContext();
+    $user = actingAsServeur($ctx->site, ['remise.view']);
+
+    Remise::factory()->create([
+        'commande_client_id' => commandeSur($ctx, $user)->id,
+        'user_id' => $user->id, 'motif' => 'la mienne',
+    ]);
+    Remise::factory()->create([
+        'commande_client_id' => commandeSur($autre, $user)->id,
+        'user_id' => $user->id, 'motif' => 'hors périmètre',
+    ]);
+
+    getJson('/api/remises')
+        ->assertOk()
+        ->assertJsonCount(1, 'data.remises')
+        ->assertJsonPath('data.remises.0.motif', 'la mienne');
 });

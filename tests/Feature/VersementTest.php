@@ -130,6 +130,51 @@ it('liste les versements d\'une caisse, du plus récent au plus ancien', functio
         ->assertJsonPath('data.1.montant', '1000.00');
 });
 
+/**
+ * L'écran de caisse aligne les sorties de tiroir en face des sessions : c'est
+ * la moitié manquante de la lecture d'un écart. Un reversement de pourboires y
+ * figure comme les autres, et la seule chose qui dit à qui l'argent est parti
+ * est le nom du bénéficiaire — `remis_a` est nul sur cette destination.
+ */
+it('nomme le bénéficiaire d\'un reversement de pourboires dans la liste', function () {
+    actingAsVersementUser(['versement.view']);
+    $caisse = Caisse::factory()->create();
+    $session = SessionCaisse::factory()->create(['caisse_id' => $caisse->id]);
+    $serveur = User::factory()->create(['prenom' => 'Kouassi', 'nom' => 'A.']);
+    Versement::factory()->auPersonnel($serveur)->create([
+        'caisse_id' => $caisse->id, 'session_caisse_id' => $session->id,
+    ]);
+
+    getJson("/api/caisses/{$caisse->id}/versements")
+        ->assertOk()
+        ->assertJsonPath('data.0.beneficiaire', 'Kouassi A.');
+});
+
+/**
+ * `en_service` distingue les deux moments, qui ne comptent pas au même endroit.
+ * Il n'est rendu que si la session est chargée : sans elle, la ligne qu'on
+ * vient de créer s'afficherait sans son moment, là où toutes les autres l'ont.
+ */
+it('dit le moment du versement qu\'il vient d\'enregistrer', function () {
+    actingAsVersementUser(['versement.create']);
+    $caisse = Caisse::factory()->create();
+    SessionCaisse::factory()->create(['caisse_id' => $caisse->id]);
+
+    postJson("/api/caisses/{$caisse->id}/versements", ['montant' => 5000, 'destination' => 'coffre'])
+        ->assertCreated()
+        ->assertJsonPath('data.en_service', true);
+});
+
+it('marque « après fermeture » un versement fait caisse close', function () {
+    actingAsVersementUser(['versement.create']);
+    $caisse = Caisse::factory()->create();
+    SessionCaisse::factory()->fermee()->create(['caisse_id' => $caisse->id]);
+
+    postJson("/api/caisses/{$caisse->id}/versements", ['montant' => 5000, 'destination' => 'banque'])
+        ->assertCreated()
+        ->assertJsonPath('data.en_service', false);
+});
+
 // ───────────────────────── effet sur le théorique ─────────────────────────
 
 /**

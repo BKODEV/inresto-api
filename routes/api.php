@@ -257,6 +257,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('commandes-client/{commande}/lignes/{ligne}', [AnnulationController::class, 'annulerLigne'])
         ->name('commandes-client.lignes.annuler');
 
+    // Relecture des remises et des annulations, en lecture seule et paginée.
+    // `remise.view` et `annulation.view` existaient au catalogue, et leurs
+    // policies portaient déjà `viewAny` — sans aucune route pour les consommer :
+    // les accorder à un rôle n'ouvrait rien. Le journal d'activité montre ces
+    // gestes au fil du service ; ces listes répondent à la question de contrôle,
+    // sur une période, avec leurs filtres propres.
+    Route::get('remises', [RemiseController::class, 'index'])->name('remises.index');
+    Route::get('annulations', [AnnulationController::class, 'index'])->name('annulations.index');
+
     // État du stock par site + journal des mouvements (lecture seule, écran
     // opérationnel de cuisine — permission `stock.view`).
     Route::get('stock', [StockController::class, 'index'])->name('stock.index');

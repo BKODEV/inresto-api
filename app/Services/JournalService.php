@@ -127,7 +127,11 @@ class JournalService
                 'reference' => (string) $a->annulable_id,
                 'montant' => null,
                 'motif' => $a->motif,
-                'detail' => $a->sort?->value,
+                // `sort` est une colonne texte, pas un enum : `?->value`
+                // renvoyait null sur une chaîne (avec un warning PHP), et le
+                // devenir du stock — remise en stock ou perte — ne s'affichait
+                // jamais, alors que c'est le contexte que le journal promet.
+                'detail' => $a->sort,
             ]);
     }
 

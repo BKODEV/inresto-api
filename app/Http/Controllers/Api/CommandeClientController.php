@@ -34,8 +34,12 @@ class CommandeClientController extends Controller
      * `user` = le serveur qui a ouvert la note. Chargé pour le poste de caisse :
      * quand un serveur vient verser, le caissier filtre sur lui pour solder ses
      * tables.
+     *
+     * `encaissePar` = qui a clôturé la note. La colonne `encaisse_par` était
+     * déjà servie, mais en identifiant : illisible sur un écran de caisse, là
+     * où c'est justement la piste d'audit qu'on vient chercher.
      */
-    private const RELATIONS = ['table', 'sessionCaisse', 'lignes.produit', 'user'];
+    private const RELATIONS = ['table', 'sessionCaisse', 'lignes.produit', 'user', 'encaissePar'];
 
     public function __construct(private readonly CommandeClientService $service) {}
 

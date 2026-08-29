@@ -37,6 +37,14 @@ class CommandeClientResource extends JsonResource
             'servie_le' => $this->servie_le?->toIso8601String(),
             // Piste d'audit de la clôture ; null tant que non encaissée.
             'encaisse_par' => $this->encaisse_par,
+            // Le nom, comme pour `serveur` : un identifiant ne se lit pas sur un
+            // écran de caisse, et c'est bien « qui a clôturé » qu'on y cherche.
+            'encaisse_par_nom' => $this->whenLoaded(
+                'encaissePar',
+                fn (): ?string => $this->encaissePar === null
+                    ? null
+                    : trim($this->encaissePar->prenom.' '.$this->encaissePar->nom),
+            ),
             'encaisse_le' => $this->encaisse_le?->toIso8601String(),
             'montant_total' => $this->montant_total,
             // Valeurs calculées à la volée (non stockées).

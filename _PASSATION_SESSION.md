@@ -31,14 +31,11 @@
 
 ## État global
 
-- **596 tests API verts (1745 assertions)**, **141 tests front verts**, builds
-  propres, Pint clean.
-- **Travail en cours sur la branche `feat/tables-caisse-audit`**, dans les **deux**
+- **644 tests API verts**, **186 tests front verts**, builds propres, Pint et
+  Prettier clean.
+- **Travail en cours sur la branche `feat/pass-cuisine`**, dans les **deux**
   dépôts, **ni fusionnée ni poussée** :
-  - API → 10 commits d'avance sur `main`, HEAD `493fe6c`.
-  - Front → 12 commits d'avance sur `main`, HEAD `7774c02`.
   - Distants : `git@github.com:BKODEV/inresto-api.git` · `…/inresto-app.git`.
-- Seul fichier non commité : `.env.example` (ajout de `FRONTEND_URL`, cf. plus bas).
 - Modules livrés (back testé + front câblé) :
   - **Socle & multi-site** : sites, points de vente, caisses, périmètre user par
     site — **appliqué par le serveur** (voir Décisions structurantes).
@@ -59,8 +56,14 @@
   - **Pourboires** : colonne dédiée sur le paiement, soldes par serveur,
     reversement par versement `personnel`, écran « Mes pourboires » pour le serveur.
   - **Journal d'activité** : frise chronologique **en lecture seule**, agrège les
-    traces des autres modules (annulations, remises, paiements, versements,
-    impressions) sans jamais écrire.
+    **six** sources des autres modules (annulations, remises, paiements,
+    encaissements, versements, impressions) sans jamais écrire. Filtrable par
+    type, dates, site et **point de vente**.
+  - **Relecture remises / annulations** : `GET /api/remises` et
+    `GET /api/annulations`, paginées et filtrées, sous `remise.view` et
+    `annulation.view`.
+  - **Postes de production cuisine** : `postes_cuisine` + catégories associées,
+    filtre `poste_cuisine_id` sur le KDS, écran Pass.
   - **Menu public par QR** : jeton **par table**, seul périmètre non authentifié.
   - **PDF** : bon de commande, fiche technique, facture A4, **addition et reçu**
     (un gabarit 80mm à deux états), rapport de fermeture, planches QR.
@@ -103,6 +106,10 @@ décisions transverses dans les **mémoires**. À retenir en tête :
   sous permission).
 - **PDF orientés revente** : zéro donnée d'établissement en dur (test
   anti-régression), en-tête pris sur le site d'impression.
+- **Une entrée de menu porte la même permission que l'API derrière elle**, et
+  la racine / la sortie de connexion / la route inconnue résolvent la **première
+  entrée ouverte** à l'utilisateur — jamais `/dashboard` en dur, qui exige
+  `reporting.dashboard`.
 - **Front : la portée de site est un tri-état** — « à choisir », un site, ou la
   vue consolidée. Les écrans opérationnels refusent le mode consolidé
   → [[perimetre-site-applique]].
@@ -167,17 +174,23 @@ décisions transverses dans les **mémoires**. À retenir en tête :
     chaque fichier passe isolément.
 14. `caisse.layout.spec.ts` laisse passer **2 « unhandled rejections »** du
     routeur Angular (`NG04002` sur `vente/caisse/ventes` et `…/pourboires`) : le
-    test ne déclare pas ces routes. Les 141 tests passent, mais Vitest prévient
-    à juste titre que ce genre de bruit peut masquer un faux positif — à nettoyer.
+    test ne déclare pas ces routes. La suite passe, mais Vitest prévient à juste
+    titre que ce genre de bruit peut masquer un faux positif — à nettoyer.
+15. **Un écran peut être entièrement codé et rester inatteignable.** Le tiroir de
+    versement, `openVerser()` et ses tests unitaires existaient depuis des
+    semaines : aucun élément du gabarit ne l'appelait. Un test de *classe* ne
+    voit pas ce trou — il faut un test de **rendu** (`TestBed.createComponent`).
+    Même famille : `choisirMode()` à l'encaissement, documenté « des boutons et
+    non une liste » pendant que le gabarit gardait le `<select>`.
 
 ### Dettes connues
 
-15. **Le site `PRINCIPAL` n'a pas forcément de fiche d'établissement** : tout PDF
+16. **Le site `PRINCIPAL` n'a pas forcément de fiche d'établissement** : tout PDF
     passant par le repli sortira sans en-tête.
-16. **Périmètre non appliqué sur `points_de_vente` et `parametre_etablissement`**,
+17. **Périmètre non appliqué sur `points_de_vente` et `parametre_etablissement`**,
     qui portent pourtant un `site_id`. Écrans réservés à des rôles
     administratifs, donc enjeu moindre — mais ils restent hors de la frontière.
-17. **Carte** : index unique partiel « une seule carte active par PDV » resté
+18. **Carte** : index unique partiel « une seule carte active par PDV » resté
     app-level (`UpdateCarteRequest`). Pas urgent.
 
 ## Mémoires liées (décisions structurantes)
