@@ -10,11 +10,15 @@ use App\Http\Requests\SessionCuisine\FermerSessionCuisineRequest;
 use App\Http\Requests\SessionCuisine\IndexSessionCuisineRequest;
 use App\Http\Requests\SessionCuisine\StoreSessionCuisineRequest;
 use App\Http\Resources\SessionCuisineResource;
+use App\Models\PointDeVente;
+use App\Models\PosteCuisine;
 use App\Models\SessionCuisine;
+use App\Models\User;
 use App\Services\SessionCuisineService;
 use App\Support\SitePerimetre;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 
 /**
@@ -108,6 +112,52 @@ class SessionCuisineController extends Controller
             new SessionCuisineResource($session),
             'Service de cuisine fermé.'
         );
+    }
+
+    /**
+     * Le personnel qu'on peut inscrire à une brigade, sur ce point de vente.
+     *
+     * Lecture volontairement MINIMALE (`id`, `nom`) et servie ici plutôt que par
+     * `GET /users` : cette dernière expose la fiche complète — contacts, rôles,
+     * sites — et exige `utilisateur.view`, une permission d'administration du
+     * personnel que le chef de cuisine n'a pas. Il se retrouvait donc en 403 sur
+     * le seul écran qu'il est censé tenir. Cocher des noms ne demande pas
+     * d'ouvrir les dossiers.
+     *
+     * `?cuisine=1` restreint aux personnes rattachées à au moins un poste de
+     * production de ce point de vente — c'est la définition de « être de la
+     * cuisine » ici. Sans le drapeau, tout le personnel du site : un extra qui
+     * ne figure dans aucun poste doit rester inscriptible, sinon un service tenu
+     * par un intérimaire ne serait imputable à personne.
+     */
+    public function personnel(Request $request, PointDeVente $point_de_vente): JsonResponse
+    {
+        // Gouverné par l'organisation de la brigade, pas par l'administration du
+        // personnel : c'est le chef qui compose ses postes et ses services.
+        $this->authorize('viewAny', PosteCuisine::class);
+
+        $point_de_vente->loadMissing('site');
+        SitePerimetre::resoudre($request->user(), (int) $point_de_vente->site_id);
+
+        $personnel = User::query()
+            ->whereHas('sites', fn (Builder $site) => $site->where('sites.id', $point_de_vente->site_id))
+            ->when(
+                $request->boolean('cuisine'),
+                fn (Builder $query) => $query->whereHas(
+                    'postesCuisine',
+                    fn (Builder $poste) => $poste->where('point_de_vente_id', $point_de_vente->id)
+                )
+            )
+            ->orderBy('prenom')
+            ->orderBy('nom')
+            ->get(['id', 'prenom', 'nom'])
+            ->map(fn (User $u): array => [
+                'id' => $u->id,
+                'nom' => trim($u->prenom.' '.$u->nom),
+            ])
+            ->all();
+
+        return ApiResponse::success(['personnel' => $personnel], 'Personnel récupéré.');
     }
 
     /**

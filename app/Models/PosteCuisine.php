@@ -58,6 +58,23 @@ class PosteCuisine extends Model
         );
     }
 
+    /**
+     * Les personnes qui tiennent ce poste.
+     *
+     * L'organigramme du chef, et le seul moyen de savoir qui est « de la
+     * cuisine » sur ce point de vente : la table `users` ne porte aucune notion
+     * de métier, et les rôles sont des jeux de permissions, pas des postes.
+     */
+    public function membres(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            User::class,
+            'poste_cuisine_user',
+            'poste_cuisine_id',
+            'user_id',
+        );
+    }
+
     public function estActif(): bool
     {
         return $this->statut === Statut::Actif;

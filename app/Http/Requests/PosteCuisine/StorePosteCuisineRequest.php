@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Requests\PosteCuisine;
 
 use App\Enums\Statut;
+use App\Http\Requests\PosteCuisine\Concerns\ValideLesMembresDuPoste;
 use App\Models\PosteCuisine;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -12,6 +13,8 @@ use Illuminate\Validation\Rule;
 
 class StorePosteCuisineRequest extends FormRequest
 {
+    use ValideLesMembresDuPoste;
+
     public function authorize(): bool
     {
         return $this->user()->can('create', PosteCuisine::class);
@@ -39,6 +42,8 @@ class StorePosteCuisineRequest extends FormRequest
             // sans catégorie ne filtre rien et n'apparaît vide à l'écran.
             'categories' => ['sometimes', 'array'],
             'categories.*' => ['integer', 'exists:categories_produit,id'],
+            // Qui tient le poste, aux mêmes conditions que les catégories.
+            ...$this->reglesMembres(),
         ];
     }
 }

@@ -63,6 +63,22 @@ class User extends Authenticatable
     }
 
     /**
+     * Les postes de production que cette personne tient.
+     *
+     * Réciproque de {@see PosteCuisine::membres()}. En être détenteur d'au moins
+     * un fait de quelqu'un un membre de la cuisine du point de vente concerné.
+     */
+    public function postesCuisine(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            PosteCuisine::class,
+            'poste_cuisine_user',
+            'user_id',
+            'poste_cuisine_id',
+        );
+    }
+
+    /**
      * Périmètre effectif de sites (actifs) de l'utilisateur : ses sites de
      * rattachement, ou **tous les sites actifs** pour le super-admin, qui n'est
      * borné par aucun périmètre (cohérent avec les Policies et le reporting).

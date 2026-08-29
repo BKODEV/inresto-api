@@ -757,6 +757,52 @@ réellement travaillé, remplacements compris.
 adossés aux **lignes** comme tout le reporting. Les lignes annulées en sont
 exclues — la brigade les a préparées, mais elles n'ont rien vendu.
 
+### La brigade se recrute parmi les postes de production
+
+Un poste de production porte les **deux moitiés** de l'organisation du pass : les
+**catégories** disent ce qu'on y produit, les **membres** qui le tient. Être
+rattaché à au moins un poste d'un point de vente, c'est **être de la cuisine** de
+ce point de vente — et c'est ce que propose le sélecteur de brigade.
+
+> **Pourquoi ?** Il déroulait tout le personnel du site, serveurs et caissiers
+> compris. Et surtout il passait par `GET /users`, qui exige `utilisateur.view` —
+> une permission d'**administration du personnel** que le chef de cuisine n'a
+> pas. Il était donc en **403 sur le seul écran qu'il tient**, sans voir personne
+> à inscrire.
+
+Le personnel affectable est servi par une lecture **minimale** — `{id, nom}` —
+sur `GET /points-de-vente/{id}/personnel`, gouvernée par `poste_cuisine.view` :
+cocher des noms ne demande pas d'ouvrir les dossiers du personnel.
+
+**Un extra reste inscriptible** : `?cuisine=1` restreint aux membres des postes,
+sans le drapeau on obtient tout le personnel du site. Borner la brigade à
+l'organigramme rendrait un service tenu par un intérimaire imputable à personne.
+
+Un membre doit appartenir au **site** du point de vente — refus explicite en 422,
+là où un `sync` aurait accepté sans broncher quelqu'un d'un autre établissement.
+
+### Pas d'entité « Équipe », et pourquoi
+
+Un service stocke des **individus** (`session_cuisine_user`), jamais une
+référence à une équipe nommée. Une équipe change de composition : si le service
+ne portait qu'un `equipe_id`, modifier « Équipe Matin » en mars réécrirait qui a
+travaillé en **janvier** — exactement ce qu'interdit la règle « les valeurs
+d'audit sont figées, jamais recalculées ».
+
+Une équipe nommée ne pourrait donc être qu'un **pré-remplissage** du sélecteur.
+Elle s'ajoutera sans rien casser le jour où les services se stabiliseront ;
+tant qu'ils tournent avec des extras, elle serait périmée en permanence.
+
+### Les postes ne sont pas un paramètre global
+
+Ils vivent sous **CUISINE**, pas sous Paramètres : c'est l'organigramme du chef.
+Tant qu'ils étaient un onglet de Paramètres, il ne pouvait littéralement pas les
+ouvrir — `parametre.view` n'est accordée qu'au gérant.
+
+> **La règle générale** : une entrée d'écran et la permission de l'**API qui
+> l'alimente** doivent être tenues par les mêmes rôles. Sinon l'écran s'affiche
+> et se charge vide, ce qui se lit comme une panne et non comme un refus.
+
 ---
 
 ## Déstockage à la vente : au service, jamais bloquant

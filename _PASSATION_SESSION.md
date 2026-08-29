@@ -31,7 +31,7 @@
 
 ## État global
 
-- **673 tests API verts**, **215 tests front verts**, builds propres, Pint et
+- **684 tests API verts**, **229 tests front verts**, builds propres, Pint et
   Prettier clean.
 - **Travail en cours sur la branche `feat/pass-cuisine`**, dans les **deux**
   dépôts, **ni fusionnée ni poussée** :
@@ -67,8 +67,11 @@
   - **Postes de production cuisine** : `postes_cuisine` + catégories associées,
     filtre `poste_cuisine_id` sur le KDS, écran Pass.
   - **Services de cuisine** : `sessions_cuisine` par point de vente, brigade en
-    pivot, rattachement des lignes à l'envoi, rapport de production. Onglet
-    « Cuisine » du poste de caisse.
+    pivot, rattachement des lignes à l'envoi, rapport de production. Section
+    **CUISINE** du menu, avec les postes de production, les recettes, le KDS et
+    le Pass — séparée de SALLE & VENTE et d'ACHATS & STOCK.
+  - **Brigade rattachée aux postes** : pivot `poste_cuisine_user`, lecture
+    minimale `GET /points-de-vente/{id}/personnel[?cuisine=1]`.
   - **Menu public par QR** : jeton **par table**, seul périmètre non authentifié.
   - **PDF** : bon de commande, fiche technique, facture A4, **addition et reçu**
     (un gabarit 80mm à deux états), rapport de fermeture, planches QR.
@@ -134,6 +137,9 @@ décisions transverses dans les **mémoires**. À retenir en tête :
 3. **Nouvelles permissions** à semer : `session_cuisine.view|ouvrir|fermer`
    (chef-cuisine les trois, gérant la lecture seule). Elles sont dans
    `PermissionCatalog` et `RoleSeeder` — donc couvertes par le point suivant.
+   ⚠️ Les rôles **en base de dev sont périmés** : `chef-cuisine` n'y porte
+   aucune permission `poste_cuisine`. Rejouer les deux seeders avant toute
+   vérification manuelle, sinon l'écran des postes paraîtra cassé.
 4. Après un déploiement, enchaîner **les deux** seeders :
    `db:seed --class=PermissionSeeder` (enregistre les permissions) puis
    `db:seed --class=RoleSeeder` (les attribue aux rôles système).
@@ -184,14 +190,22 @@ décisions transverses dans les **mémoires**. À retenir en tête :
     routeur Angular (`NG04002` sur `vente/caisse/ventes` et `…/pourboires`) : le
     test ne déclare pas ces routes. La suite passe, mais Vitest prévient à juste
     titre que ce genre de bruit peut masquer un faux positif — à nettoyer.
-16. **`LigneCommandeClientFactory::envoyee()` rappelle `now()` à chaque ligne.**
+16. **Une entrée d'écran et la permission de l'API qui l'alimente doivent être
+    tenues par les MÊMES rôles.** Deux cas rencontrés le même jour : le
+    sélecteur de brigade appelait `GET /users` (`utilisateur.view`, absente du
+    chef) et l'écran des postes vivait sous Paramètres (`parametre.view`, idem).
+    Dans les deux cas l'écran s'affichait et se chargeait vide — ce qui se lit
+    comme une panne, pas comme un refus. Un test verrouille désormais que chaque
+    entrée de menu résout vers une vraie route (`app.routes.spec.ts`), mais la
+    correspondance des permissions reste à vérifier à la main.
+17. **`LigneCommandeClientFactory::envoyee()` rappelle `now()` à chaque ligne.**
     Le KDS groupe ses tours par (commande, `envoyee_le`) : deux lignes créées de
     part et d'autre d'une seconde formaient deux tours au lieu d'un, d'où un
     échec intermittent (≈1 sur 3). Tout test attendant PLUSIEURS lignes dans un
     seul tour doit appeler `$this->freezeTime()` — c'est écrit sur la factory.
     En production le problème n'existe pas : `envoyerEnCuisine()` pose un seul
     horodatage pour tout le tour.
-17. **Un écran peut être entièrement codé et rester inatteignable.** Le tiroir de
+18. **Un écran peut être entièrement codé et rester inatteignable.** Le tiroir de
     versement, `openVerser()` et ses tests unitaires existaient depuis des
     semaines : aucun élément du gabarit ne l'appelait. Un test de *classe* ne
     voit pas ce trou — il faut un test de **rendu** (`TestBed.createComponent`).
@@ -200,12 +214,12 @@ décisions transverses dans les **mémoires**. À retenir en tête :
 
 ### Dettes connues
 
-18. **Le site `PRINCIPAL` n'a pas forcément de fiche d'établissement** : tout PDF
+19. **Le site `PRINCIPAL` n'a pas forcément de fiche d'établissement** : tout PDF
     passant par le repli sortira sans en-tête.
-19. **Périmètre non appliqué sur `points_de_vente` et `parametre_etablissement`**,
+20. **Périmètre non appliqué sur `points_de_vente` et `parametre_etablissement`**,
     qui portent pourtant un `site_id`. Écrans réservés à des rôles
     administratifs, donc enjeu moindre — mais ils restent hors de la frontière.
-20. **Carte** : index unique partiel « une seule carte active par PDV » resté
+21. **Carte** : index unique partiel « une seule carte active par PDV » resté
     app-level (`UpdateCarteRequest`). Pas urgent.
 
 ## Mémoires liées (décisions structurantes)

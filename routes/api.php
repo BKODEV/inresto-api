@@ -259,6 +259,12 @@ Route::middleware('auth:sanctum')->group(function () {
     // Ce que la brigade a produit : la raison d'être du module.
     Route::get('sessions-cuisine/{session_cuisine}/production', [SessionCuisineController::class, 'production'])
         ->name('sessions-cuisine.production');
+    // Qui peut être inscrit à une brigade. Lecture minimale, gouvernée par
+    // `poste_cuisine.view` : composer une équipe relève de l'organisation du
+    // pass, pas de l'administration du personnel — le chef n'a pas
+    // `utilisateur.view` et se retrouvait en 403 sur son propre écran.
+    Route::get('points-de-vente/{point_de_vente}/personnel', [SessionCuisineController::class, 'personnel'])
+        ->name('points-de-vente.personnel');
 
     // Module Salle — Lot C-2 : paiements, remises, annulations.
     Route::post('commandes-client/{commande}/paiements', [PaiementController::class, 'store'])

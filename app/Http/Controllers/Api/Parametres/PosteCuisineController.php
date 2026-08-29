@@ -19,8 +19,11 @@ use Illuminate\Support\Facades\DB;
 /**
  * Paramétrage des postes de production et de leurs catégories.
  *
- * Le rattachement des catégories est écrit par `sync()` : c'est un ENSEMBLE que
- * l'écran de paramétrage repose en entier, pas une liste à laquelle on ajoute.
+ * Le rattachement des catégories ET des membres est écrit par `sync()` : ce sont
+ * des ENSEMBLES que l'écran repose en entier, pas des listes à compléter.
+ *
+ * Un poste porte donc les deux moitiés de l'organisation du pass : ce qu'on y
+ * produit (catégories) et qui le tient (membres).
  */
 class PosteCuisineController extends Controller
 {
@@ -31,7 +34,7 @@ class PosteCuisineController extends Controller
         $sites = SitePerimetre::resoudre($request->user(), null);
 
         $postes = PosteCuisine::query()
-            ->with(['categories', 'pointDeVente'])
+            ->with(['categories', 'membres', 'pointDeVente'])
             ->when(
                 $sites !== null,
                 fn (Builder $query) => $query->whereHas(
@@ -59,14 +62,15 @@ class PosteCuisineController extends Controller
         $data = $request->validated();
 
         $poste = DB::transaction(function () use ($data): PosteCuisine {
-            $poste = PosteCuisine::create(collect($data)->except('categories')->all());
+            $poste = PosteCuisine::create(collect($data)->except(['categories', 'membres'])->all());
             $poste->categories()->sync($data['categories'] ?? []);
+            $poste->membres()->sync($data['membres'] ?? []);
 
             return $poste;
         });
 
         return ApiResponse::created(
-            new PosteCuisineResource($poste->load(['categories', 'pointDeVente'])),
+            new PosteCuisineResource($poste->load(['categories', 'membres', 'pointDeVente'])),
             'Poste de cuisine créé.'
         );
     }
@@ -76,7 +80,7 @@ class PosteCuisineController extends Controller
         $this->authorize('view', $poste_cuisine);
 
         return ApiResponse::success(
-            new PosteCuisineResource($poste_cuisine->load(['categories', 'pointDeVente'])),
+            new PosteCuisineResource($poste_cuisine->load(['categories', 'membres', 'pointDeVente'])),
             'Poste de cuisine récupéré.'
         );
     }
@@ -86,18 +90,22 @@ class PosteCuisineController extends Controller
         $data = $request->validated();
 
         DB::transaction(function () use ($data, $poste_cuisine): void {
-            $poste_cuisine->update(collect($data)->except('categories')->all());
+            $poste_cuisine->update(collect($data)->except(['categories', 'membres'])->all());
 
             // `sync` seulement si la clé est présente : absente, le rattachement
             // ne bouge pas ; vide, on détache tout — deux intentions distinctes
-            // qu'un `?? []` confondrait.
+            // qu'un `?? []` confondrait. Vrai des catégories comme des membres.
             if (array_key_exists('categories', $data)) {
                 $poste_cuisine->categories()->sync($data['categories']);
+            }
+
+            if (array_key_exists('membres', $data)) {
+                $poste_cuisine->membres()->sync($data['membres']);
             }
         });
 
         return ApiResponse::updated(
-            new PosteCuisineResource($poste_cuisine->load(['categories', 'pointDeVente'])),
+            new PosteCuisineResource($poste_cuisine->load(['categories', 'membres', 'pointDeVente'])),
             'Poste de cuisine mis à jour.'
         );
     }
@@ -106,9 +114,10 @@ class PosteCuisineController extends Controller
     {
         $this->authorize('delete', $poste_cuisine);
 
-        // Rien à protéger : un poste ne porte aucun historique, seulement un
-        // rattachement de catégories que la cascade emporte. Le supprimer
-        // renvoie ses plats sur tous les écrans, jamais dans le vide.
+        // Rien à protéger : un poste ne porte aucun historique, seulement des
+        // rattachements — catégories et membres — que la cascade emporte. Le
+        // supprimer renvoie ses plats sur tous les écrans, jamais dans le vide,
+        // et ses membres restent du personnel du site.
         $poste_cuisine->delete();
 
         return ApiResponse::deleted('Poste de cuisine supprimé.');
