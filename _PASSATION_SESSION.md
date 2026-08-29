@@ -184,7 +184,14 @@ décisions transverses dans les **mémoires**. À retenir en tête :
     routeur Angular (`NG04002` sur `vente/caisse/ventes` et `…/pourboires`) : le
     test ne déclare pas ces routes. La suite passe, mais Vitest prévient à juste
     titre que ce genre de bruit peut masquer un faux positif — à nettoyer.
-16. **Un écran peut être entièrement codé et rester inatteignable.** Le tiroir de
+16. **`LigneCommandeClientFactory::envoyee()` rappelle `now()` à chaque ligne.**
+    Le KDS groupe ses tours par (commande, `envoyee_le`) : deux lignes créées de
+    part et d'autre d'une seconde formaient deux tours au lieu d'un, d'où un
+    échec intermittent (≈1 sur 3). Tout test attendant PLUSIEURS lignes dans un
+    seul tour doit appeler `$this->freezeTime()` — c'est écrit sur la factory.
+    En production le problème n'existe pas : `envoyerEnCuisine()` pose un seul
+    horodatage pour tout le tour.
+17. **Un écran peut être entièrement codé et rester inatteignable.** Le tiroir de
     versement, `openVerser()` et ses tests unitaires existaient depuis des
     semaines : aucun élément du gabarit ne l'appelait. Un test de *classe* ne
     voit pas ce trou — il faut un test de **rendu** (`TestBed.createComponent`).
@@ -193,16 +200,11 @@ décisions transverses dans les **mémoires**. À retenir en tête :
 
 ### Dettes connues
 
-17. **Le site `PRINCIPAL` n'a pas forcément de fiche d'établissement** : tout PDF
+18. **Le site `PRINCIPAL` n'a pas forcément de fiche d'établissement** : tout PDF
     passant par le repli sortira sans en-tête.
-18. **Périmètre non appliqué sur `points_de_vente` et `parametre_etablissement`**,
+19. **Périmètre non appliqué sur `points_de_vente` et `parametre_etablissement`**,
     qui portent pourtant un `site_id`. Écrans réservés à des rôles
     administratifs, donc enjeu moindre — mais ils restent hors de la frontière.
-19. **`tests/Feature/CommandeClientTest.php` « KDS : restreint la file au poste »
-    est INSTABLE** (≈1 échec sur 3 exécutions de la suite complète) : les deux
-    lignes sont créées avec `envoyee_le = now()` et le KDS groupe les tours par
-    horodatage ISO — à cheval sur une seconde, elles forment deux tours au lieu
-    d'un. Une seconde figée le règle.
 20. **Carte** : index unique partiel « une seule carte active par PDV » resté
     app-level (`UpdateCarteRequest`). Pas urgent.
 

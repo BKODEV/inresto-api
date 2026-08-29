@@ -1224,6 +1224,12 @@ it('KDS et pass portent la catégorie du produit sur chaque ligne', function () 
  * Le filtre par poste : l'équipe du chaud ne voit pas les entrées.
  */
 it('KDS : restreint la file au poste demandé', function () {
+    // Temps figé : le KDS groupe ses tours par (commande, `envoyee_le`), et
+    // l'état `envoyee()` de la factory rappelle `now()` à CHAQUE ligne. Deux
+    // créations de part et d'autre d'une seconde donnaient deux tours au lieu
+    // d'un, et la file attendue se scindait — d'où un échec intermittent.
+    $this->freezeTime();
+
     $ctx = salleContext();
     $user = actingAsCuisine($ctx->site);
 
@@ -1265,6 +1271,10 @@ it('KDS : restreint la file au poste demandé', function () {
  * réclame.
  */
 it('KDS : un plat non affecté reste visible de tous les postes', function () {
+    // Trois lignes attendues dans UN seul tour : même raison qu'au-dessus, le
+    // temps doit être figé pour qu'elles partagent leur `envoyee_le`.
+    $this->freezeTime();
+
     $ctx = salleContext();
     $user = actingAsCuisine($ctx->site);
 

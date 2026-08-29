@@ -6,6 +6,7 @@ use App\Enums\Statut;
 use App\Models\CommandeClient;
 use App\Models\LigneCommandeClient;
 use App\Models\Produit;
+use App\Services\CommandeClientService;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -31,6 +32,15 @@ class LigneCommandeClientFactory extends Factory
      * Ligne partie en cuisine. Le cycle de vie vit sur la LIGNE : poser le
      * statut de la note ne suffit pas à rendre une ligne visible au KDS ni
      * servable.
+     *
+     * ⚠️ `now()` est réévalué à CHAQUE appel : deux lignes créées de part et
+     * d'autre d'une seconde n'ont pas le même `envoyee_le`. Or le KDS groupe
+     * ses tours par (commande, `envoyee_le`) — en production toutes les lignes
+     * d'un tour reçoivent le même horodatage, posé une seule fois par
+     * {@see CommandeClientService::envoyerEnCuisine()}.
+     *
+     * Un test qui attend PLUSIEURS lignes dans un seul tour doit donc figer le
+     * temps (`$this->freezeTime()`), sinon il échoue par intermittence.
      */
     public function envoyee(): static
     {
