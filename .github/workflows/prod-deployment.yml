@@ -170,13 +170,16 @@ jobs:
           $SSH $SSH_USER@$SSH_HOST "
             set -e
             cd $DEPLOY_PATH
-            sudo -u www-data php artisan optimize:clear
+            # Seule la config est vidée avant migrate : le cache vit en base (CACHE_STORE=database)
+            # et sa table n'existe pas encore à la première installation.
+            sudo -u www-data php artisan config:clear
             sudo -u www-data php artisan migrate --force
 
             # Seeders idempotents. DatabaseSeeder n'inclut PAS SuperAdminSeeder (il remettrait
             # le mot de passe par défaut) : le super-admin se crée une fois, à la main.
             sudo -u www-data php artisan db:seed --force
 
+            sudo -u www-data php artisan optimize:clear
             sudo -u www-data php artisan optimize
             sudo -u www-data php artisan up
             sudo systemctl reload php8.4-fpm
