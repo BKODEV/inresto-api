@@ -79,7 +79,7 @@ jobs:
           set_env APP_FAKER_LOCALE "fr_FR"
           set_env LOG_STACK "daily"
           set_env LOG_LEVEL "warning"
-          set_env DB_CONNECTION "mysql"
+          set_env DB_CONNECTION "pgsql"
           set_env DB_HOST "127.0.0.1"
           set_env DB_PORT "$DB_PORT"
           set_env DB_DATABASE "$DB_DATABASE"
