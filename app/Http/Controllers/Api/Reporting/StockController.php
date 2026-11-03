@@ -33,9 +33,12 @@ class StockController extends ReportingController
     {
         $this->authorizeReporting('reporting.stock');
 
+        $sites = $this->siteScope($request);
+        $periode = $this->periode($request->validated());
+
         $data = $this->service->consommation(
-            $this->periode($request->validated()),
-            $this->siteScope($request),
+            $periode,
+            $sites,
         );
 
         return ApiResponse::success(['matieres' => $data], 'Consommation matière récupérée.');
@@ -45,9 +48,12 @@ class StockController extends ReportingController
     {
         $this->authorizeReporting('reporting.stock');
 
+        $sites = $this->siteScope($request);
+        $periode = $this->periode($request->validated());
+
         $data = $this->service->ecartsInventaire(
-            $this->periode($request->validated()),
-            $this->siteScope($request),
+            $periode,
+            $sites,
             $request->boolean('detail'),
         );
 

@@ -21,22 +21,43 @@ class VentesController extends ReportingController
     {
         $this->authorizeReporting('reporting.ventes');
 
-        $data = $this->service->caParPointDeVente(
-            $this->periode($request->validated()),
-            $this->siteScope($request),
-            $this->pointDeVenteId($request),
-        );
+        $sites = $this->siteScope($request);
+        $periode = $this->periode($request->validated());
 
-        return ApiResponse::success(['points_de_vente' => $data], 'CA par point de vente récupéré.');
+        $pdvId = $this->pointDeVenteId($request);
+        $data = $this->service->caParPointDeVente($periode, $sites, $pdvId);
+
+        $reponse = ['points_de_vente' => $data];
+
+        if ($this->comparaison($request)) {
+            $precedente = $this->periodePrecedente($periode);
+            $avant = $this->service->caParPointDeVente($precedente, $sites, $pdvId);
+
+            $reponse['comparaison'] = $this->blocComparaison($precedente, [
+                'ca' => [
+                    'courant' => (float) array_sum(array_column($data, 'ca')),
+                    'precedent' => (float) array_sum(array_column($avant, 'ca')),
+                ],
+                'nombre_commandes' => [
+                    'courant' => (float) array_sum(array_column($data, 'nombre_commandes')),
+                    'precedent' => (float) array_sum(array_column($avant, 'nombre_commandes')),
+                ],
+            ]);
+        }
+
+        return ApiResponse::success($reponse, 'CA par point de vente récupéré.');
     }
 
     public function produits(ReportingRequest $request): JsonResponse
     {
         $this->authorizeReporting('reporting.ventes');
 
+        $sites = $this->siteScope($request);
+        $periode = $this->periode($request->validated());
+
         $data = $this->service->produits(
-            $this->periode($request->validated()),
-            $this->siteScope($request),
+            $periode,
+            $sites,
             $this->pointDeVenteId($request),
             $request->input('tri', 'ca'),
             $request->input('ordre', 'desc'),
@@ -50,9 +71,12 @@ class VentesController extends ReportingController
     {
         $this->authorizeReporting('reporting.ventes');
 
+        $sites = $this->siteScope($request);
+        $periode = $this->periode($request->validated());
+
         $data = $this->service->modesPaiement(
-            $this->periode($request->validated()),
-            $this->siteScope($request),
+            $periode,
+            $sites,
             $this->pointDeVenteId($request),
         );
 
@@ -63,9 +87,12 @@ class VentesController extends ReportingController
     {
         $this->authorizeReporting('reporting.ventes');
 
+        $sites = $this->siteScope($request);
+        $periode = $this->periode($request->validated());
+
         $data = $this->service->serveurs(
-            $this->periode($request->validated()),
-            $this->siteScope($request),
+            $periode,
+            $sites,
             $this->pointDeVenteId($request),
         );
 
@@ -76,9 +103,12 @@ class VentesController extends ReportingController
     {
         $this->authorizeReporting('reporting.ventes');
 
+        $sites = $this->siteScope($request);
+        $periode = $this->periode($request->validated());
+
         $data = $this->service->evolution(
-            $this->periode($request->validated()),
-            $this->siteScope($request),
+            $periode,
+            $sites,
             $this->pointDeVenteId($request),
         );
 

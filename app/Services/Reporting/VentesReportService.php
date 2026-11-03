@@ -100,10 +100,12 @@ class VentesReportService
     {
         $base = fn (): Builder => DB::table('paiements as pay')
             ->join('commandes_client as cc', 'cc.id', '=', 'pay.commande_client_id')
+            ->join('sessions_caisse as sc', 'sc.id', '=', 'cc.session_caisse_id')
             ->join('tables_salle as t', 't.id', '=', 'cc.table_id')
             ->join('points_de_vente as pdv', 'pdv.id', '=', 't.point_de_vente_id')
             ->where('cc.statut', 'encaissee')
-            ->whereBetween('cc.date_heure', [$periode->debut, $periode->fin])
+            // Comme le CA : l'encaissement appartient au service qui l'a reçu.
+            ->whereBetween('sc.ouvert_le', [$periode->debut, $periode->fin])
             ->when($siteIds !== null, fn (Builder $q) => $q->whereIn('pdv.site_id', $siteIds))
             ->when($pdvId !== null, fn (Builder $q) => $q->where('pdv.id', $pdvId));
 
@@ -173,16 +175,24 @@ class VentesReportService
             ->leftJoin('lignes_commande_client as l', function ($join) {
                 $join->on('l.commande_client_id', '=', 'cc.id')->where('l.statut', '=', 'actif');
             })
-            ->groupBy('cc.id', 'cc.date_heure')
-            ->selectRaw('cc.id, cc.date_heure, COALESCE(SUM(l.quantite * l.prix_unitaire), 0) as ca')
+            ->groupBy('cc.id', 'cc.date_heure', 'sc.ouvert_le')
+            ->selectRaw('cc.id, cc.date_heure, sc.ouvert_le, COALESCE(SUM(l.quantite * l.prix_unitaire), 0) as ca')
             ->get();
 
         $parHeure = $periode->type === 'jour';
         $buckets = $this->bucketsVides($periode, $parHeure);
 
         foreach ($commandes as $commande) {
-            $date = Carbon::parse($commande->date_heure);
-            $cle = $parHeure ? $date->format('H') : $date->format('Y-m-d');
+            // Deux dates, deux usages. Le JOUR est celui de l'ouverture de
+            // session — sans quoi une note de 01h30 tomberait dans le seau du
+            // lendemain alors qu'elle appartient au service de la veille, et la
+            // courbe cesserait de coïncider avec le rapport du même jour.
+            // L'HEURE, elle, reste celle de la note : c'est le moment réel du
+            // coup de feu, et le rattacher à l'ouverture les écraserait tous
+            // sur la même barre.
+            $cle = $parHeure
+                ? Carbon::parse($commande->date_heure)->format('H')
+                : Carbon::parse($commande->ouvert_le)->format('Y-m-d');
 
             if (! isset($buckets[$cle])) {
                 continue;
@@ -201,6 +211,10 @@ class VentesReportService
 
     /**
      * Squelette des intervalles (clé => label/ca/nb), bornes incluses.
+     *
+     * Les seaux sont des JOURS CALENDAIRES : c'est la lecture qui parle à tout
+     * le monde. Le rattachement au service se fait en amont, en rangeant chaque
+     * note dans le jour d'ouverture de sa session.
      *
      * @return array<string, array{label: string, ca: float, nombre_commandes: int}>
      */

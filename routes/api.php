@@ -37,6 +37,7 @@ use App\Http\Controllers\Api\Reporting\BudgetController as ReportingBudgetContro
 use App\Http\Controllers\Api\Reporting\DashboardController as ReportingDashboardController;
 use App\Http\Controllers\Api\Reporting\FoodCostController as ReportingFoodCostController;
 use App\Http\Controllers\Api\Reporting\StockController as ReportingStockController;
+use App\Http\Controllers\Api\Reporting\TresorerieController as ReportingTresorerieController;
 use App\Http\Controllers\Api\Reporting\VentesController as ReportingVentesController;
 use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SessionCaisseController;
@@ -202,6 +203,10 @@ Route::middleware('auth:sanctum')->group(function () {
         ->parameters(['sessions-caisse' => 'session']);
     Route::post('sessions-caisse/{session}/fermer', [SessionCaisseController::class, 'fermer'])
         ->name('sessions-caisse.fermer');
+    // Ce que le tiroir devrait contenir MAINTENANT. Sous permission dédiée, et
+    // refusé au porteur de la session : voir SessionCaisseController::position().
+    Route::get('sessions-caisse/{session}/position', [SessionCaisseController::class, 'position'])
+        ->name('sessions-caisse.position');
     Route::get('pourboires/soldes', [PourboireController::class, 'soldes'])
         ->name('pourboires.soldes');
     Route::get('pourboires/mon-solde', [PourboireController::class, 'monSolde'])
@@ -349,6 +354,11 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('consommation', [ReportingStockController::class, 'consommation'])->name('consommation');
             Route::get('ecarts-inventaire', [ReportingStockController::class, 'ecartsInventaire'])->name('ecarts-inventaire');
             Route::get('alertes', [ReportingStockController::class, 'alertes'])->name('alertes');
+        });
+
+        // Trésorerie : ce qu'on A, par opposition à ce qu'on a vendu.
+        Route::prefix('tresorerie')->name('tresorerie.')->group(function () {
+            Route::get('position', [ReportingTresorerieController::class, 'position'])->name('position');
         });
 
         Route::prefix('budget')->name('budget.')->group(function () {

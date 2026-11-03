@@ -8,6 +8,7 @@ use App\Models\ModeDePaiement;
 use App\Models\Paiement;
 use App\Models\ParametreEtablissement;
 use App\Models\SessionCaisse;
+use App\Models\Site;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -28,6 +29,18 @@ function actingAsSessionUser(array $permissions = []): User
         Permission::findOrCreate($name, 'api');
     }
     $user->givePermissionTo($permissions);
+
+    // Ces deux fichiers ne testent PAS le périmètre : ils testent le
+    // rapprochement et les versements. Leur donner tous les sites est donc la
+    // bonne sémantique — et la seule qui évite de réécrire une cinquantaine de
+    // corps de test pour une frontière qui n'est pas leur sujet.
+    //
+    // En deux temps, parce que les factories fabriquent des sites en cascade
+    // APRÈS la création de l'utilisateur (caisse → point de vente → site) :
+    // les sites déjà là, puis ceux qui viendront.
+    $user->sites()->syncWithoutDetaching(Site::pluck('id')->all());
+    Site::created(fn (Site $site) => $user->sites()->syncWithoutDetaching([$site->id]));
+
     Sanctum::actingAs($user);
 
     return $user;

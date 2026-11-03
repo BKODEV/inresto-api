@@ -13,6 +13,7 @@ use App\Models\MouvementStock;
 use App\Models\Paiement;
 use App\Models\PointDeVente;
 use App\Models\Produit;
+use App\Models\SessionCaisse;
 use App\Models\Site;
 use App\Models\Stock;
 use App\Models\TableSalle;
@@ -36,6 +37,9 @@ afterEach(function () {
 /**
  * Crée une commande vendue sur la table avec une ligne (quantite × prix) à la
  * date donnée. Retourne la commande pour d'éventuels paiements.
+ *
+ * Le SERVICE est ouvert à cette date, et pas seulement la note : c'est
+ * l'ouverture de session qui date une vente dans le reporting.
  */
 function dashboardCommande(TableSalle $table, int $quantite, float $prix, Carbon $dateHeure, string $statut = 'servie'): CommandeClient
 {
@@ -43,6 +47,7 @@ function dashboardCommande(TableSalle $table, int $quantite, float $prix, Carbon
         'table_id' => $table->id,
         'statut' => $statut,
         'date_heure' => $dateHeure,
+        'session_caisse_id' => SessionCaisse::factory()->ouvertLe($dateHeure)->create()->id,
     ]);
 
     LigneCommandeClient::factory()->create([

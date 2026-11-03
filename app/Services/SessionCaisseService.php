@@ -7,7 +7,9 @@ namespace App\Services;
 use App\Enums\StatutCommandeClient;
 use App\Enums\StatutSessionCaisse;
 use App\Exceptions\SessionCaisseException;
+use App\Models\ModeDePaiement;
 use App\Models\SessionCaisse;
+use App\Policies\SessionCaissePolicy;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -22,11 +24,20 @@ use Illuminate\Support\Facades\DB;
  * Le rapprochement suppose toujours que la saisie a lieu au moment où l'argent
  * est remis — un paiement enregistré compte immédiatement comme en tiroir.
  *
- * POINT D'EXTENSION :
- *  - Le périmètre d'accès « utiliser une session » se remonte via
- *    caisse → point de vente → site, croisé avec le pivot `user_site` et la
- *    permission `session_caisse.utiliser`. Contrôle appliqué au Lot C (création
- *    de commandes sur une session ouverte) ; non requis pour ouvrir/fermer.
+ * PÉRIMÈTRE : une session appartient au SITE de son tiroir, remonté via
+ * caisse → point de vente et croisé avec le pivot `user_site`.
+ *
+ * Le contrôle a longtemps été jugé « non requis pour ouvrir/fermer » — il ne
+ * valait que pour l'usage d'une session en salle
+ * ({@see CommandeClientService::assertPeutUtiliserSession()}). C'était une
+ * asymétrie, pas une décision : le serveur qui posait une note était borné
+ * pendant que le caissier qui ouvre le tiroir, le compte et le vide ne l'était
+ * pas. Un montant théorique, un écart et un motif de forçage se lisaient donc
+ * d'un site à l'autre, et un versement s'y enregistrait.
+ *
+ * Il est désormais porté par {@see SessionCaissePolicy} et par
+ * le filtrage de l'index, et non par ce service : ouvrir et fermer restent des
+ * gestes, l'autorisation se décide avant eux.
  */
 class SessionCaisseService
 {
@@ -68,6 +79,90 @@ class SessionCaisseService
 
             return $session->load(['caisse.pointDeVente.site', 'user']);
         });
+    }
+
+    /**
+     * Ce que la session a en caisse à l'instant t, contenant par contenant.
+     *
+     * Aucun calcul neuf : on projette {@see SessionCaisse::theoriqueParMode()},
+     * qui sert déjà à figer les rapprochements à la fermeture. Le chiffre était
+     * donc là depuis le début, simplement inatteignable tant que la caisse
+     * tournait.
+     *
+     * Les pourboires sont montrés à part : ils sont physiquement dans le tiroir
+     * et comptent dans le théorique, mais ils n'appartiennent pas à
+     * l'établissement. Sur X en caisse, Y est dû aux serveurs — une position de
+     * trésorerie qui tairait cette dette annoncerait plus d'argent qu'il n'y en a.
+     *
+     * @return array<string, mixed>
+     */
+    public function position(SessionCaisse $session): array
+    {
+        $lignes = $session->theoriqueParMode();
+
+        $enTiroir = 0.0;
+        $horsTiroir = 0.0;
+        $contenants = [];
+
+        foreach ($lignes as $ligne) {
+            $mode = $ligne['mode'];
+            $theorique = (float) $ligne['theorique'];
+
+            $mode->compte_en_caisse
+                ? $enTiroir += $theorique
+                : $horsTiroir += $theorique;
+
+            $contenants[] = [
+                'mode_de_paiement_id' => $mode->id,
+                'mode' => $mode->libelle,
+                'compte_en_caisse' => (bool) $mode->compte_en_caisse,
+                'theorique' => round($theorique, 2),
+            ];
+        }
+
+        $fondsInitial = (float) $session->fonds_initial;
+        $verseEnService = $session->montantVerseEnService();
+
+        // `theoriqueParMode()` rattache le fonds initial (moins les versements)
+        // au PREMIER mode en tiroir. S'il n'existe aucun mode actif en tiroir, ce
+        // porteur est null et le fonds disparaît de la ventilation — alors que
+        // fermer() le garde dans `montant_theorique`. On l'expose plutôt que de
+        // rendre un total et des lignes qui ne tombent pas d'accord.
+        $ventile = $this->existeUnModeEnTiroir($lignes);
+
+        return [
+            'session_caisse_id' => $session->id,
+            'caisse' => $session->caisse?->libelle,
+            'ouverte' => $session->estOuverte(),
+            'fonds_initial' => round($fondsInitial, 2),
+            'versements_en_service' => round($verseEnService, 2),
+            'contenants' => $contenants,
+            'total_en_tiroir' => round($ventile ? $enTiroir : $enTiroir + $fondsInitial - $verseEnService, 2),
+            'total_hors_tiroir' => round($horsTiroir, 2),
+            // Non nul seulement dans le cas dégradé ci-dessus : aucun contenant
+            // ne peut porter le fonds, il flotte donc hors ventilation.
+            'fonds_non_ventile' => $ventile ? 0.0 : round($fondsInitial - $verseEnService, 2),
+            'pourboires_dus' => [
+                'total' => $session->totalPourboires(),
+                'par_serveur' => $session->pourboiresParServeur(),
+            ],
+        ];
+    }
+
+    /**
+     * Existe-t-il un contenant capable de porter le fonds initial ?
+     *
+     * @param  array<int, array{mode: ModeDePaiement, theorique: float}>  $lignes
+     */
+    private function existeUnModeEnTiroir(array $lignes): bool
+    {
+        foreach ($lignes as $ligne) {
+            if ($ligne['mode']->compte_en_caisse) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -480,8 +480,11 @@ function sessionFermeeAvecVentes(): SessionCaisse
 }
 
 it('génère le rapport de fermeture en PDF', function () {
-    actingWithPdfPerms(['session_caisse.view']);
+    $user = actingWithPdfPerms(['session_caisse.view']);
     $session = sessionFermeeAvecVentes();
+    // Un rapport Z porte l'écart et le motif de forçage d'un tiroir : il se lit
+    // désormais dans le périmètre du site, comme la session elle-même.
+    $user->sites()->syncWithoutDetaching([$session->caisse->pointDeVente->site_id]);
 
     getJson("/api/sessions-caisse/{$session->id}/rapport-fermeture")
         ->assertOk()
@@ -547,6 +550,7 @@ it('porte les deux signatures, ouverture et fermeture', function () {
 it('journalise l\'impression du rapport de fermeture', function () {
     $user = actingWithPdfPerms(['session_caisse.view']);
     $session = sessionFermeeAvecVentes();
+    $user->sites()->syncWithoutDetaching([$session->caisse->pointDeVente->site_id]);
 
     getJson("/api/sessions-caisse/{$session->id}/rapport-fermeture")->assertOk();
 

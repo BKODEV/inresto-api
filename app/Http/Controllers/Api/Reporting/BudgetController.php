@@ -22,9 +22,12 @@ class BudgetController extends ReportingController
     {
         $this->authorizeReporting('reporting.budget');
 
+        $sites = $this->siteScope($request);
+        $periode = $this->periode($request->validated());
+
         $budgets = $this->service->consommation(
-            $this->periode($request->validated()),
-            $this->siteScope($request),
+            $periode,
+            $sites,
         );
 
         return ApiResponse::success(
@@ -37,9 +40,12 @@ class BudgetController extends ReportingController
     {
         $this->authorizeReporting('reporting.budget');
 
+        $sites = $this->siteScope($request);
+        $periode = $this->periode($request->validated());
+
         $data = $this->service->depenses(
-            $this->periode($request->validated()),
-            $this->siteScope($request),
+            $periode,
+            $sites,
         );
 
         return ApiResponse::success($data, 'Dépenses détaillées récupérées.');

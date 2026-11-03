@@ -78,6 +78,13 @@ class ProduitController extends Controller
                     'lignesMatiere.matierePremiere',
                     'lignesMatiere.unite',
                     'lignesSousRecette.sousRecette',
+                    // La méthodologie fait partie de la fiche : c'est d'ici que
+                    // le drawer d'édition repart. Sans elle, l'écran affiche une
+                    // recette vide après enregistrement et la version suivante
+                    // effacerait les étapes.
+                    'etapes',
+                    'materiels',
+                    'pointsCritiques',
                 ]),
         ]);
 

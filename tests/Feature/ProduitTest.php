@@ -146,3 +146,28 @@ it('refuse la création sans la permission', function () {
         'libelle' => 'X',
     ])->assertForbidden();
 });
+
+/**
+ * Le détail produit est l'unique écran d'édition de la fiche : le drawer repart
+ * de la méthodologie embarquée ici. Si elle manque, l'écran affiche une recette
+ * vide après enregistrement, et la version suivante effacerait les étapes.
+ */
+it('embarque la méthodologie de la fiche active dans le détail produit', function () {
+    actingAsProduitUser(['produit.view']);
+    $produit = Produit::factory()->create();
+    $fiche = FicheTechnique::factory()->create(['produit_id' => $produit->id]);
+
+    $fiche->etapes()->create(['ordre' => 1, 'description' => 'Désosser le poulet.', 'duree_minutes' => 10]);
+    $fiche->etapes()->create(['ordre' => 2, 'description' => 'Mariner au piment vert.', 'duree_minutes' => 20]);
+    $fiche->materiels()->create(['ordre' => 1, 'libelle' => 'Braisière']);
+    $fiche->pointsCritiques()->create(['ordre' => 1, 'type' => 'cuisson', 'description' => 'À cœur : 74 °C.']);
+
+    getJson("/api/produits/{$produit->id}")
+        ->assertOk()
+        ->assertJsonCount(2, 'data.fiche_technique.etapes')
+        ->assertJsonPath('data.fiche_technique.etapes.0.description', 'Désosser le poulet.')
+        ->assertJsonCount(1, 'data.fiche_technique.materiels')
+        ->assertJsonPath('data.fiche_technique.materiels.0.libelle', 'Braisière')
+        ->assertJsonCount(1, 'data.fiche_technique.points_critiques')
+        ->assertJsonPath('data.fiche_technique.duree_totale_minutes', 30);
+});

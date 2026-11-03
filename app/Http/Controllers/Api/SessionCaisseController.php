@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api;
 
+use App\Exceptions\SessionCaisseException;
 use App\Helpers\ApiResponse;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\SessionCaisse\FermerSessionCaisseRequest;
@@ -11,6 +12,7 @@ use App\Http\Requests\SessionCaisse\OuvrirSessionCaisseRequest;
 use App\Http\Resources\SessionCaisseResource;
 use App\Models\SessionCaisse;
 use App\Services\SessionCaisseService;
+use App\Support\SitePerimetre;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -37,8 +39,24 @@ class SessionCaisseController extends Controller
     {
         $this->authorize('viewAny', SessionCaisse::class);
 
+        // Une session est une opération : elle appartient au site de son tiroir.
+        // Sans ce bornage, la liste rendait TOUTES les sessions de la base —
+        // montant théorique, écart et motif de forçage compris — à quiconque
+        // portait `session_caisse.view`.
+        $sites = SitePerimetre::resoudre(
+            $request->user(),
+            $request->filled('site_id') ? $request->integer('site_id') : null,
+        );
+
         $sessions = SessionCaisse::query()
             ->with(self::RELATIONS)
+            ->when(
+                $sites !== null,
+                fn (Builder $query) => $query->whereHas(
+                    'caisse.pointDeVente',
+                    fn (Builder $pdv) => $pdv->whereIn('site_id', $sites),
+                )
+            )
             ->when(
                 $request->filled('caisse_id'),
                 fn (Builder $query) => $query->where('caisse_id', $request->integer('caisse_id'))
@@ -72,6 +90,35 @@ class SessionCaisseController extends Controller
         return ApiResponse::success(
             new SessionCaisseResource($session->load(self::RELATIONS)),
             'Session de caisse récupérée.'
+        );
+    }
+
+    /**
+     * Ce que ce tiroir devrait contenir, MAINTENANT, contenant par contenant.
+     *
+     * Le calcul existait déjà — {@see SessionCaisse::theoriqueParMode()} — mais
+     * n'était appelé qu'à la fermeture. On ne pouvait donc pas répondre, en
+     * plein service, à « combien avons-nous en caisse ? ».
+     *
+     * Deux garde-fous, et le second est le vrai :
+     *  - la permission `session_caisse.consulter_theorique`, absente du rôle
+     *    caissier (portée par la policy, avec le périmètre de site) ;
+     *  - le refus au PORTEUR d'une session encore ouverte, vérifié ici et non
+     *    dans la policy : `before()` y laisse passer le super-admin, alors que
+     *    cette règle-ci ne parle pas de droits mais d'intégrité du comptage.
+     *    Celui qui comptera ce soir compte à l'aveugle, quel que soit son rôle.
+     */
+    public function position(Request $request, SessionCaisse $session): JsonResponse
+    {
+        $this->authorize('consulterTheorique', $session);
+
+        if ($session->estOuverte() && $session->user_id === $request->user()->id) {
+            throw SessionCaisseException::theoriqueRefuseAuPorteur($session->id);
+        }
+
+        return ApiResponse::success(
+            $this->service->position($session->load(self::RELATIONS)),
+            'Position de la caisse récupérée.'
         );
     }
 

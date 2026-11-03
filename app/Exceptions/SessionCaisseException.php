@@ -29,6 +29,21 @@ class SessionCaisseException extends RuntimeException
     }
 
     /**
+     * Celui qui comptera ce soir ne lit pas ce qu'il devrait trouver.
+     *
+     * Un montant affiché se recopie : le rapprochement ne mesurerait plus que
+     * la capacité du caissier à lire un écran. La règle vaut quel que soit le
+     * rôle — c'est de l'intégrité du comptage qu'il s'agit, pas de droits.
+     */
+    public static function theoriqueRefuseAuPorteur(int $sessionId): self
+    {
+        return new self(
+            "Vous tenez la session de caisse (id: {$sessionId}) : son montant théorique ne peut vous être communiqué avant que le tiroir soit compté.",
+            403
+        );
+    }
+
+    /**
      * Un contenant n'a pas été compté.
      *
      * Tout mode de paiement accepté est vérifiable à la fermeture : on compte
