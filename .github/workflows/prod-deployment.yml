@@ -1,0 +1,190 @@
+name: Production Deployment
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Deux tags poussés coup sur coup ne doivent pas déployer en parallèle sur le même dossier.
+concurrency:
+  group: prod-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy-prod:
+    runs-on: ubuntu-latest
+
+    env:
+      SSH_USER: ${{ secrets.PROD_SSH_USER }}
+      SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+      DEPLOY_PATH: "/var/www/restoapi.innov-immobilier.com"
+      TEMP_DIR: "/home/tmp/new-inresto-api"
+      COMPOSER_PATH: "/usr/local/bin/composer"
+      APP_URL: "https://restoapi.innov-immobilier.com"
+      FRONTEND_URL: "https://resto.innov-immobilier.com"
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configuration SSH
+        env:
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+        run: |
+          echo "$PROD_SSH_PRIVATE_KEY" > private_key
+          chmod 600 private_key
+          echo "SSH=ssh -i private_key -o StrictHostKeyChecking=no" >> "$GITHUB_ENV"
+
+      - name: Détection de la première installation
+        run: |
+          FIRST_INSTALL=$($SSH $SSH_USER@$SSH_HOST "
+            if [ ! -d '$DEPLOY_PATH' ] || [ -z \"\$(ls -A '$DEPLOY_PATH')\" ]; then
+              echo 'true'
+            else
+              echo 'false'
+            fi
+          ")
+          echo "FIRST_INSTALL=$FIRST_INSTALL" >> "$GITHUB_ENV"
+          echo "Première installation : $FIRST_INSTALL"
+
+      # Le .env n'est généré qu'à la première installation ; ensuite celui du serveur fait foi
+      # (toute modification ultérieure se fait à la main dans $DEPLOY_PATH/.env).
+      # Il est construit ICI plutôt qu'à coups de sed sur le serveur : un mot de passe contenant
+      # « | », « & » ou des guillemets ne casse ainsi ni le remplacement ni la commande ssh.
+      - name: Génération du .env de production
+        if: env.FIRST_INSTALL == 'true'
+        env:
+          DB_PORT: ${{ secrets.PROD_DB_PORT }}
+          DB_DATABASE: ${{ secrets.PROD_DB_DATABASE }}
+          DB_USERNAME: ${{ secrets.PROD_DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.PROD_DB_PASSWORD }}
+        run: |
+          cp .env.example .env.production
+
+          set_env() {
+            KEY="$1" VALUE="$2" awk '
+              BEGIN { k = ENVIRON["KEY"]; v = ENVIRON["VALUE"]; done = 0 }
+              $0 ~ "^#? ?" k "=" { print k "=\047" v "\047"; done = 1; next }
+              { print }
+              END { if (!done) print k "=\047" v "\047" }
+            ' .env.production > .env.tmp && mv .env.tmp .env.production
+          }
+
+          set_env APP_NAME "InResto"
+          set_env APP_ENV "production"
+          set_env APP_DEBUG "false"
+          set_env APP_URL "$APP_URL"
+          set_env APP_LOCALE "fr"
+          set_env APP_FALLBACK_LOCALE "fr"
+          set_env APP_FAKER_LOCALE "fr_FR"
+          set_env LOG_STACK "daily"
+          set_env LOG_LEVEL "warning"
+          set_env DB_CONNECTION "mysql"
+          set_env DB_HOST "127.0.0.1"
+          set_env DB_PORT "$DB_PORT"
+          set_env DB_DATABASE "$DB_DATABASE"
+          set_env DB_USERNAME "$DB_USERNAME"
+          set_env DB_PASSWORD "$DB_PASSWORD"
+          set_env FRONTEND_URL "$FRONTEND_URL"
+          set_env CORS_ALLOWED_ORIGINS "$FRONTEND_URL"
+
+      - name: Transfert des fichiers vers le répertoire temporaire
+        run: |
+          $SSH $SSH_USER@$SSH_HOST "
+            sudo mkdir -p $TEMP_DIR &&
+            sudo chown -R $SSH_USER:$SSH_USER $TEMP_DIR &&
+            sudo chmod -R 755 $TEMP_DIR
+          "
+
+          # Les fichiers d'environnement locaux et les tests ne partent jamais ; storage et
+          # bootstrap/cache ne partent qu'à la première installation (ensuite ils vivent sur le serveur).
+          EXCLUDES=(--exclude '.git*' --exclude 'node_modules' --exclude '.DS_Store'
+                    --exclude 'tests' --exclude '.env' --exclude '.env.production'
+                    --exclude '.claude' --exclude 'private_key')
+          if [ "$FIRST_INSTALL" != "true" ]; then
+            EXCLUDES+=(--exclude 'storage' --exclude 'bootstrap/cache')
+          fi
+
+          rsync -az --delete "${EXCLUDES[@]}" -e "$SSH" ./ $SSH_USER@$SSH_HOST:$TEMP_DIR/
+
+          if [ "$FIRST_INSTALL" == "true" ]; then
+            rsync -az -e "$SSH" .env.production $SSH_USER@$SSH_HOST:$TEMP_DIR/.env
+          fi
+
+      - name: Installation des dépendances
+        run: |
+          $SSH $SSH_USER@$SSH_HOST "
+            set -e
+            cd $TEMP_DIR
+            # bootstrap/cache est exclu des mises à jour ; sans lui, package:discover échoue
+            # à la fin de composer install.
+            mkdir -p bootstrap/cache
+            $COMPOSER_PATH install --no-dev --optimize-autoloader --no-interaction --no-progress
+          "
+
+      - name: Première installation
+        if: env.FIRST_INSTALL == 'true'
+        run: |
+          $SSH $SSH_USER@$SSH_HOST "
+            set -e
+            sudo mkdir -p $DEPLOY_PATH
+            sudo rsync -a --delete $TEMP_DIR/ $DEPLOY_PATH/
+
+            sudo chown -R www-data:www-data $DEPLOY_PATH
+            sudo chmod -R 775 $DEPLOY_PATH
+            sudo chmod -R g+rw $DEPLOY_PATH
+            # Les nouveaux fichiers héritent du groupe www-data.
+            sudo find $DEPLOY_PATH -type d -exec chmod g+s {} +
+            sudo chmod 640 $DEPLOY_PATH/.env
+
+            cd $DEPLOY_PATH
+            sudo -u www-data php artisan key:generate --force
+            sudo -u www-data php artisan storage:link
+          "
+
+      - name: Mise à jour
+        if: env.FIRST_INSTALL != 'true'
+        run: |
+          $SSH $SSH_USER@$SSH_HOST "
+            set -e
+            cd $DEPLOY_PATH
+            sudo -u www-data php artisan down --retry=15 || true
+
+            sudo rsync -a --delete \
+                       --exclude '.env' \
+                       --exclude 'storage' \
+                       --exclude 'bootstrap/cache' \
+                       $TEMP_DIR/ $DEPLOY_PATH/
+
+            sudo chown -R www-data:www-data $DEPLOY_PATH
+            sudo chmod -R 775 $DEPLOY_PATH/storage $DEPLOY_PATH/bootstrap/cache
+            sudo chmod -R g+rw $DEPLOY_PATH
+            sudo find $DEPLOY_PATH -type d -exec chmod g+s {} +
+          "
+
+      - name: Migrations, référentiels et mise en cache
+        run: |
+          $SSH $SSH_USER@$SSH_HOST "
+            set -e
+            cd $DEPLOY_PATH
+            sudo -u www-data php artisan optimize:clear
+            sudo -u www-data php artisan migrate --force
+
+            # Seeders idempotents. DatabaseSeeder n'inclut PAS SuperAdminSeeder (il remettrait
+            # le mot de passe par défaut) : le super-admin se crée une fois, à la main.
+            sudo -u www-data php artisan db:seed --force
+
+            sudo -u www-data php artisan optimize
+            sudo -u www-data php artisan up
+            sudo systemctl reload php8.4-fpm
+            sudo rm -rf $TEMP_DIR
+          "
+
+      - name: Nettoyage
+        if: always()
+        run: rm -f private_key .env.production
+
+      - name: Debug Info
+        run: |
+          echo "Tag: ${{ github.ref_name }}"
+          echo "Première installation : $FIRST_INSTALL"

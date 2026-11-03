@@ -13,17 +13,17 @@ class DatabaseSeeder extends Seeder
     {
         // Seeders = données par défaut RÉELLES uniquement (pas de factory).
         // Les données de démonstration se génèrent via : php artisan inresto:demo
-        // SiteSeeder avant SuperAdminSeeder : le super-admin est rattaché au
-        // site PRINCIPAL, qui doit donc déjà exister.
-        // RoleSeeder après PermissionSeeder (assigne des permissions existantes)
-        // et avant SuperAdminSeeder (le super-admin reçoit le rôle système).
+        // RoleSeeder après PermissionSeeder (assigne des permissions existantes).
+        // SuperAdminSeeder est volontairement HORS de cette liste : db:seed tourne à
+        // chaque déploiement et il remettrait le mot de passe du super-admin à sa
+        // valeur par défaut. À lancer à la main, une fois, après DatabaseSeeder :
+        //   php artisan db:seed --class=SuperAdminSeeder
         // Les seeders de nomenclature (catégories, unités) posent les référentiels
         // usuels d'un restaurant pour démarrer sur des données réelles.
         $this->call([
             PermissionSeeder::class,
             RoleSeeder::class,
             SiteSeeder::class,
-            SuperAdminSeeder::class,
             CategorieProduitSeeder::class,
             CategorieMatierePremiereSeeder::class,
             UniteDeMesureSeeder::class,
