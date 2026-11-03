@@ -6,6 +6,7 @@ namespace App\Services\Reporting;
 
 use App\Models\Budget;
 use App\Support\Periode;
+use App\Support\PeriodeResolver;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 
@@ -26,6 +27,7 @@ class DashboardReportService
         private readonly FoodCostReportService $foodCost,
         private readonly StockReportService $stock,
         private readonly BudgetReportService $budget,
+        private readonly PeriodeResolver $periodeResolver,
     ) {}
 
     /**
@@ -204,18 +206,27 @@ class DashboardReportService
         ], $this->ventes->modesPaiement($mois, $siteIds, null));
     }
 
+    /**
+     * Les trois périodes passent par le resolver plutôt que par un `new Periode`
+     * à la main : une seule définition de « aujourd'hui », « ce mois-ci » et
+     * « les 30 derniers jours » pour toute l'application.
+     */
     private function periodeJour(): Periode
     {
-        return new Periode(Carbon::today()->startOfDay(), Carbon::today()->endOfDay(), 'jour');
+        return $this->periodeResolver->resolve(['periode' => 'jour']);
     }
 
     private function periodeMois(): Periode
     {
-        return new Periode(Carbon::today()->startOfMonth(), Carbon::today()->endOfMonth(), 'mois');
+        return $this->periodeResolver->resolve(['periode' => 'mois']);
     }
 
     private function periodeTrenteJours(): Periode
     {
-        return new Periode(Carbon::today()->subDays(29)->startOfDay(), Carbon::today()->endOfDay(), 'plage');
+        return $this->periodeResolver->resolve([
+            'periode' => 'plage',
+            'date_debut' => Carbon::today()->subDays(29)->toDateString(),
+            'date_fin' => Carbon::today()->toDateString(),
+        ]);
     }
 }

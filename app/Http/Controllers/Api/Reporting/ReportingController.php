@@ -40,6 +40,63 @@ abstract class ReportingController extends Controller
     }
 
     /**
+     * Période immédiatement précédente, pour une lecture comparée.
+     */
+    protected function periodePrecedente(Periode $periode): Periode
+    {
+        return $this->periodeResolver->precedente($periode);
+    }
+
+    /** L'appelant demande-t-il la comparaison à la période précédente ? */
+    protected function comparaison(Request $request): bool
+    {
+        return $request->boolean('comparer');
+    }
+
+    /**
+     * Variation en pourcentage entre deux mesures, ou null.
+     *
+     * Null — et non zéro, ni l'infini — quand la période précédente vaut zéro :
+     * passer de 0 à 400 000 n'est pas « +∞ % », c'est une comparaison qui n'a
+     * pas de sens. L'écran affiche un tiret plutôt qu'un chiffre inventé.
+     */
+    protected function variation(float $courant, float $precedent): ?float
+    {
+        if ($precedent == 0.0) {
+            return null;
+        }
+
+        return round(($courant - $precedent) / abs($precedent) * 100, 2);
+    }
+
+    /**
+     * Enveloppe d'une lecture comparée : bornes de la période précédente et
+     * mesures mises en regard.
+     *
+     * @param  array<string, array{courant: float, precedent: float}>  $mesures
+     * @return array<string, mixed>
+     */
+    protected function blocComparaison(Periode $precedente, array $mesures): array
+    {
+        $bloc = [
+            'periode_precedente' => [
+                'debut' => $precedente->debut->toIso8601String(),
+                'fin' => $precedente->fin->toIso8601String(),
+            ],
+        ];
+
+        foreach ($mesures as $cle => $mesure) {
+            $bloc[$cle] = [
+                'courant' => round($mesure['courant'], 2),
+                'precedent' => round($mesure['precedent'], 2),
+                'variation_pct' => $this->variation($mesure['courant'], $mesure['precedent']),
+            ];
+        }
+
+        return $bloc;
+    }
+
+    /**
      * Périmètre de sites à appliquer aux agrégations.
      *
      * - `null` : tous les sites (réservé à `reporting.global`, sans filtre site_id).

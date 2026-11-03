@@ -76,3 +76,10 @@ it('installe une instance neuve et crée le premier super-admin via inresto:inst
 
     expect(User::where('identifiant', 'admin')->count())->toBe(1);
 });
+
+it('ne crée ni ne réinitialise le super-admin via db:seed (relancé à chaque déploiement)', function () {
+    $this->seed();
+
+    expect(User::where('identifiant', 'superadmin')->exists())->toBeFalse()
+        ->and(Role::where('name', Role::SUPER_ADMIN)->exists())->toBeTrue();
+});

@@ -34,6 +34,7 @@
 - [Journal d'activité : on relit, on ne réécrit pas](#journal-dactivité--on-relit-on-ne-réécrit-pas)
 - [Machines à états — mémo transversal](#machines-à-états--mémo-transversal)
 - [Pilotage / Reporting : lecture seule, adossé au « vendu »](#pilotage--reporting--lecture-seule-adossé-au--vendu-)
+- [Une vente appartient au service qui l'a produite](#une-vente-appartient-au-service-qui-la-produite)
 
 ---
 
@@ -1470,11 +1471,54 @@ Le module Reporting **ne modifie jamais** aucune donnée : il **agrège** ce que
 autres modules ont produit. Toute la lecture des ventes part d'une base commune :
 une commande client compte comme **vendue** dès le statut `servie` (et le reste une
 fois `encaissee`) — **l'encaissement ne change pas la base**. Date de référence =
-`commandes_client.date_heure`.
+**`sessions_caisse.ouvert_le`**, pas l'horodatage de la note.
 
 > **Pourquoi « servie » et pas « encaissée » ?** La vente est réelle dès que le
 > plat est produit et servi (c'est aussi là que le stock est déchargé). Attendre
 > l'encaissement décalerait le CA et le food cost d'une étape purement financière.
+
+### Une vente appartient au service qui l'a produite
+
+Le calendrier fait foi partout, **sauf** sur un point : une vente n'est pas datée
+par l'heure de sa note, mais par l'**ouverture de la session de caisse** qui l'a
+reçue.
+
+```
+service ouvert le 3 à 18h, fermé le 4 à 2h
+  → TOUT ce service compte pour le 3
+```
+
+> **Pourquoi ?** Une soirée à cheval sur minuit se coupait en deux : le chiffre du
+> 3 était amputé de ses dernières tables, et celui du 4 gonflé d'un service auquel
+> il n'avait pas participé. Aucun des deux nombres ne décrivait une soirée.
+
+Le rattachement ne demande **aucun réglage** : `commandes_client.session_caisse_id`
+est `NOT NULL`, donc toute note a un service d'origine. En pratique, la borne
+change de colonne — `whereBetween('sc.ouvert_le', …)` au lieu de
+`cc.date_heure` — et les bornes restent du calendrier pur.
+
+**L'heure de bascule paramétrable a été essayée puis retirée.** Elle demandait un
+réglage par site que personne ne pense à faire, changeait tous les chiffres quand
+on y touchait, contaminait les colonnes de type `date` (`budgets.mois`,
+`depenses.date_depense`) dès que la borne haute glissait d'un jour, et ne pouvait
+pas s'appliquer à un périmètre multi-site — deux établissements ne ferment pas à
+la même heure. C'était une approximation de la session : autant prendre la session.
+
+**Deux horloges, assumées.** Le rattachement au service ne vaut que pour ce qui
+passe par une caisse : ventes, food cost, encaissements, pourboires, écarts. Le
+stock, les réceptions, les dépenses et les inventaires restent datés au
+**calendrier** — ce sont des travaux de journée, pas de service.
+
+Deux limites connues, qui se signalent plutôt qu'elles ne se corrigent :
+
+| Cas | Effet |
+|---|---|
+| Une caisse laissée ouverte plusieurs jours | Tout son CA se concentre sur sa date d'ouverture |
+| Une caisse ouverte **après minuit** pour une relève | Rattachée au lendemain, alors que le service a commencé la veille |
+
+Dans la série temporelle, le **jour** vient de la session mais l'**heure** reste
+celle de la note : c'est le moment réel du coup de feu, et le rattacher à
+l'ouverture écraserait toutes les ventes sur une seule barre.
 
 ### Food cost : théorique vs réel
 

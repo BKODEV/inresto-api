@@ -68,6 +68,15 @@ final class PermissionCatalog
                 ...self::crud('table', 'les tables de salle'),
                 ...self::crud('session_caisse', 'les sessions de caisse'),
                 'session_caisse.utiliser' => 'Utiliser une session de caisse',
+                // Lire, en cours de service, ce que le tiroir DEVRAIT contenir.
+                //
+                // Volontairement séparée de `session_caisse.view`, et à ne jamais
+                // donner au caissier : la règle « on ne souffle jamais le montant
+                // attendu » protège l'acte de comptage. Un montant affiché se
+                // recopie, et le rapprochement ne mesurerait plus que la capacité
+                // du caissier à lire un écran. Le porteur de la session ouverte
+                // est refusé par le code, même s'il porte cette permission.
+                'session_caisse.consulter_theorique' => 'Consulter en cours de service ce que la caisse devrait contenir',
                 ...self::crud('commande_client', 'les commandes client'),
                 'commande_client.encaisser' => 'Encaisser une commande client',
                 'commande_client.marquer_pret' => 'Annoncer un plat prêt au pass',
@@ -98,6 +107,11 @@ final class PermissionCatalog
                 'reporting.stock' => 'Reporting — stock',
                 'reporting.budget' => 'Reporting — budget',
                 'reporting.dashboard' => 'Tableau de bord (synthèse transversale)',
+                // Où en est l'argent : position des tiroirs, écarts cumulés,
+                // impayés, coffre, ce qu'on doit aux fournisseurs. Distincte des
+                // autres familles parce qu'elle ne parle pas de marge mais
+                // d'encaisse, et que tout le monde n'a pas à la lire.
+                'reporting.tresorerie' => 'Reporting — trésorerie (position, écarts, impayés)',
                 'reporting.global' => 'Reporting — accès à tous les sites',
             ],
         ];

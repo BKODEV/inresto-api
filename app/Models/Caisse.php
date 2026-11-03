@@ -31,6 +31,19 @@ class Caisse extends Model
         return $this->belongsTo(PointDeVente::class);
     }
 
+    /**
+     * Site auquel ce tiroir appartient.
+     *
+     * Une caisse ne porte pas de `site_id` : il se remonte par le point de
+     * vente. L'accesseur existe pour que les policies ne recopient pas cette
+     * chaîne — quand un chemin d'accès est écrit à quatre endroits, il finit par
+     * être oublié au cinquième.
+     */
+    public function siteId(): ?int
+    {
+        return $this->pointDeVente?->site_id;
+    }
+
     /** Sorties d'argent de ce tiroir : coffre, banque, direction. */
     public function versements(): HasMany
     {

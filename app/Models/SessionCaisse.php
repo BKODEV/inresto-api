@@ -7,6 +7,7 @@ namespace App\Models;
 use App\Enums\Statut;
 use App\Enums\StatutCommandeClient;
 use App\Enums\StatutSessionCaisse;
+use App\Policies\SessionCaissePolicy;
 use Database\Factories\SessionCaisseFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -111,6 +112,19 @@ class SessionCaisse extends Model
                 StatutCommandeClient::EnvoyeeEnCuisine->value,
             ])
             ->get();
+    }
+
+    /**
+     * Site du tiroir sur lequel cette session tourne.
+     *
+     * Remonté par caisse → point de vente. C'est la frontière sur laquelle
+     * s'appuient {@see SessionCaissePolicy} et le filtrage des
+     * listes : une session de caisse est une opération, elle appartient donc à
+     * un site, contrairement aux définitions partagées.
+     */
+    public function siteId(): ?int
+    {
+        return $this->caisse?->siteId();
     }
 
     public function estOuverte(): bool

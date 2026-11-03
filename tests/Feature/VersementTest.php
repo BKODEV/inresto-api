@@ -7,6 +7,7 @@ use App\Models\CommandeClient;
 use App\Models\ModeDePaiement;
 use App\Models\Paiement;
 use App\Models\SessionCaisse;
+use App\Models\Site;
 use App\Models\User;
 use App\Models\Versement;
 use App\Services\PdfService;
@@ -30,6 +31,18 @@ function actingAsVersementUser(array $permissions = []): User
         Permission::findOrCreate($name, 'api');
     }
     $user->givePermissionTo($permissions);
+
+    // Ces deux fichiers ne testent PAS le périmètre : ils testent le
+    // rapprochement et les versements. Leur donner tous les sites est donc la
+    // bonne sémantique — et la seule qui évite de réécrire une cinquantaine de
+    // corps de test pour une frontière qui n'est pas leur sujet.
+    //
+    // En deux temps, parce que les factories fabriquent des sites en cascade
+    // APRÈS la création de l'utilisateur (caisse → point de vente → site) :
+    // les sites déjà là, puis ceux qui viendront.
+    $user->sites()->syncWithoutDetaching(Site::pluck('id')->all());
+    Site::created(fn (Site $site) => $user->sites()->syncWithoutDetaching([$site->id]));
+
     Sanctum::actingAs($user);
 
     return $user;
@@ -309,7 +322,7 @@ it('inscrit le versement au journal d\'activité', function () {
     $caisse = Caisse::factory()->create();
     // Le journal est borné au périmètre de sites de l'utilisateur.
     $user = actingAsVersementUser(['versement.create', 'journal.view']);
-    $user->sites()->attach($caisse->pointDeVente->site_id);
+    $user->sites()->syncWithoutDetaching([$caisse->pointDeVente->site_id]);
     SessionCaisse::factory()->create(['caisse_id' => $caisse->id]);
 
     postJson("/api/caisses/{$caisse->id}/versements", [
@@ -395,7 +408,7 @@ it('court le solde des pourboires à travers les sessions', function () {
     }
 
     $gerant = actingAsVersementUser(['versement.view']);
-    $gerant->sites()->attach($ctx->site->id);
+    $gerant->sites()->syncWithoutDetaching([$ctx->site->id]);
 
     getJson('/api/pourboires/soldes')
         ->assertOk()
@@ -415,7 +428,7 @@ it('éteint la dette au fil des reversements', function () {
     ])->assertCreated();
 
     $gerant = actingAsVersementUser(['versement.view', 'versement.create']);
-    $gerant->sites()->attach($ctx->site->id);
+    $gerant->sites()->syncWithoutDetaching([$ctx->site->id]);
 
     postJson("/api/caisses/{$ctx->caisse->id}/versements", [
         'montant' => 800, 'destination' => 'personnel', 'beneficiaire_id' => $serveur->id,
@@ -439,7 +452,7 @@ it('ne compte comme reversement que ce qui va au personnel', function () {
     ])->assertCreated();
 
     $gerant = actingAsVersementUser(['versement.view', 'versement.create']);
-    $gerant->sites()->attach($ctx->site->id);
+    $gerant->sites()->syncWithoutDetaching([$ctx->site->id]);
     postJson("/api/caisses/{$ctx->caisse->id}/versements", [
         'montant' => 1000, 'destination' => 'coffre',
     ])->assertCreated();

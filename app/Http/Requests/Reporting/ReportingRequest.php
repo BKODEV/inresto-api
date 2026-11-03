@@ -41,6 +41,10 @@ class ReportingRequest extends FormRequest
             'ordre' => ['sometimes', 'in:asc,desc'],
             'limit' => ['sometimes', 'integer', 'min:1', 'max:500'],
             'detail' => ['sometimes', 'boolean'],
+            // Lecture comparée : le rapport rend aussi la période immédiatement
+            // précédente et la variation. Piloter, c'est comparer — jusqu'ici on
+            // ne pouvait que constater.
+            'comparer' => ['sometimes', 'boolean'],
         ];
     }
 }

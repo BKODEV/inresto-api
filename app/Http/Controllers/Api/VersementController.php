@@ -11,7 +11,9 @@ use App\Http\Resources\VersementResource;
 use App\Models\Caisse;
 use App\Models\Versement;
 use App\Services\VersementService;
+use App\Support\SitePerimetre;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class VersementController extends Controller
 {
@@ -20,9 +22,14 @@ class VersementController extends Controller
     /**
      * Versements d'une caisse, du plus récent au plus ancien.
      */
-    public function index(Caisse $caisse): JsonResponse
+    public function index(Request $request, Caisse $caisse): JsonResponse
     {
         $this->authorize('viewAny', Versement::class);
+
+        // Le tiroir désigne le site : lire les sorties d'argent d'un
+        // établissement hors de son périmètre n'a pas plus de sens que de les
+        // provoquer. La levée de SitePerimetre suffit, on n'exploite pas le retour.
+        SitePerimetre::resoudre($request->user(), $caisse->siteId());
 
         $versements = $caisse->versements()
             // `beneficiaire` : un reversement de pourboires nomme la personne

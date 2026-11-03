@@ -70,6 +70,9 @@ class RoleSeeder extends Seeder
                     ...$this->crud('table'),
                     ...$this->crud('session_caisse'), 'session_caisse.utiliser',
                     'session_caisse.forcer_fermeture',
+                    // Au gérant, jamais au caissier : c'est la lecture de
+                    // pilotage, pas l'acte de comptage.
+                    'session_caisse.consulter_theorique',
                     ...$this->crud('commande_client'), 'commande_client.encaisser',
                     'commande_client.marquer_pret',
                     ...$this->crud('poste_cuisine'),
@@ -86,6 +89,7 @@ class RoleSeeder extends Seeder
                     'fichetechnique.view', 'sousrecette.view',
                     'reporting.food_cost', 'reporting.ventes', 'reporting.stock',
                     'reporting.budget', 'reporting.dashboard', 'reporting.global',
+                    'reporting.tresorerie',
                     // Journal d'activité : c'est le gérant qui contrôle les
                     // annulations, remises et réimpressions de son personnel.
                     'journal.view',
