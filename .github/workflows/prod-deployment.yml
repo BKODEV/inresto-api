@@ -137,7 +137,8 @@ jobs:
             sudo chmod -R g+rw $DEPLOY_PATH
             # Les nouveaux fichiers héritent du groupe www-data.
             sudo find $DEPLOY_PATH -type d -exec chmod g+s {} +
-            sudo chmod 640 $DEPLOY_PATH/.env
+            # 660 : innov-dev (groupe www-data) doit pouvoir éditer le .env à la main.
+            sudo chmod 660 $DEPLOY_PATH/.env
 
             cd $DEPLOY_PATH
             sudo -u www-data php artisan key:generate --force
