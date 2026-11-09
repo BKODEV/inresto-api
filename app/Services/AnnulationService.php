@@ -90,6 +90,9 @@ class AnnulationService
             // Le poste qui a reçu le plat doit apprendre qu'il ne faut plus le
             // faire. Sans effet si la ligne était déjà servie.
             $this->bonsCuisine->emettreAnnulation($commande, new EloquentCollection([$ligne]), $userId);
+            // Le bon qui l'avait envoyée attend peut-être encore à la caisse :
+            // il perd ce plat, et l'annulation n'a alors rien à arrêter.
+            $this->bonsCuisine->reviserAttente([$commande->id]);
 
             $this->recalculerMontantTotal($commande);
 
@@ -119,6 +122,7 @@ class AnnulationService
             $commande->lignes()->where('statut', Statut::Actif->value)->update(['statut' => Statut::Inactif->value]);
 
             $this->bonsCuisine->emettreAnnulation($commande, $lignesActives, $userId);
+            $this->bonsCuisine->reviserAttente([$commande->id]);
 
             $commande->statut = StatutCommandeClient::Annulee;
             $commande->montant_total = 0;

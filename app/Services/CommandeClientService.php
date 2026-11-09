@@ -340,6 +340,10 @@ class CommandeClientService
                 $ligne->save();
             }
 
+            // Servi sans que son bon soit sorti : l'imprimer maintenant ferait
+            // cuire le plat une seconde fois.
+            $this->bonsCuisine->reviserAttente([$commande->id]);
+
             $this->rafraichirStatut($commande);
 
             return $commande->load(['table', 'sessionCaisse', 'lignes.produit']);

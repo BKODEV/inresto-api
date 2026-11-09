@@ -517,3 +517,112 @@ it('indique au poste la part de la table qu\'il prépare', function () {
 
     expect($html)->toContain('Bon 1/2')->toContain('Bon 2/2');
 });
+
+// ───────────────────────── bons devenus sans objet ─────────────────────────
+
+/**
+ * Le plat a été servi alors que son bon attendait encore à la caisse : le
+ * sortir maintenant ferait cuire une seconde fois ce qui est déjà en salle.
+ */
+it('retire de la file un bon dont les plats ont été servis sans lui', function () {
+    $ctx = bonSalle();
+    bonEnvoyer($ctx, [[bonProduit($ctx, 'Poulet'), 1]]);
+
+    postJson("/api/commandes-client/{$ctx->commande->id}/servir")->assertOk();
+
+    $bon = BonCuisine::query()->sole();
+    expect($bon->sans_objet_le)->not->toBeNull()
+        ->and($bon->imprime_le)->toBeNull();
+
+    getJson("/api/points-de-vente/{$ctx->pdv->id}/bons-cuisine?a_imprimer=1")->assertJsonCount(0, 'data');
+    getJson("/api/points-de-vente/{$ctx->pdv->id}/bons-cuisine/pdf")->assertStatus(409);
+    getJson("/api/bons-cuisine/{$bon->id}/pdf")->assertStatus(409);
+
+    // Rien n'est effacé : le bon reste lisible dans la journée.
+    getJson("/api/points-de-vente/{$ctx->pdv->id}/bons-cuisine")
+        ->assertJsonCount(1, 'data')
+        ->assertJsonPath('data.0.sans_objet', true)
+        ->assertJsonPath('data.0.a_imprimer', false);
+});
+
+it('n\'imprime que les plats encore à faire', function () {
+    $ctx = bonSalle();
+    bonEnvoyer($ctx, [[bonProduit($ctx, 'Poulet'), 1], [bonProduit($ctx, 'Frites'), 1]]);
+    $poulet = LigneCommandeClient::query()->whereHas('produit', fn ($q) => $q->where('libelle', 'Poulet'))->sole();
+
+    postJson("/api/commandes-client/{$ctx->commande->id}/servir", ['lignes' => [$poulet->id]])->assertOk();
+
+    $bon = BonCuisine::query()->sole();
+    expect($bon->estAImprimer())->toBeTrue();
+
+    getJson("/api/commandes-client/{$ctx->commande->id}/bons-cuisine")
+        ->assertJsonPath('data.0.lignes.0.produit_libelle', 'Poulet')
+        ->assertJsonPath('data.0.lignes.0.sans_objet', true)
+        ->assertJsonPath('data.0.lignes.1.sans_objet', false);
+
+    $html = app(PdfService::class)->htmlBonsCuisine(collect([$bon->load('commande.user')]));
+    expect($html)->toContain('Frites')->not->toContain('Poulet');
+});
+
+/**
+ * Envoyé puis annulé avant que la caisse n'imprime : la cuisine n'a jamais rien
+ * su. Sortir l'envoi ferait cuire le plat ; sortir l'annulation, arrêter un
+ * plat que personne n'a lancé.
+ */
+it('retire l\'envoi et son annulation quand rien n\'a été imprimé', function () {
+    $ctx = bonSalle();
+    bonEnvoyer($ctx, [[bonProduit($ctx, 'Poulet'), 1]]);
+    $ligne = LigneCommandeClient::query()->sole();
+
+    deleteJson("/api/commandes-client/{$ctx->commande->id}/lignes/{$ligne->id}", ['motif' => 'erreur de saisie'])->assertOk();
+
+    expect(BonCuisine::query()->count())->toBe(2)
+        ->and(BonCuisine::query()->enAttente()->count())->toBe(0);
+});
+
+it('garde l\'annulation quand l\'envoi est déjà en cuisine', function () {
+    $ctx = bonSalle();
+    bonEnvoyer($ctx, [[bonProduit($ctx, 'Poulet'), 1]]);
+    getJson("/api/points-de-vente/{$ctx->pdv->id}/bons-cuisine/pdf")->assertOk();
+    $ligne = LigneCommandeClient::query()->sole();
+
+    deleteJson("/api/commandes-client/{$ctx->commande->id}/lignes/{$ligne->id}", ['motif' => 'client parti'])->assertOk();
+
+    $enAttente = BonCuisine::query()->enAttente()->get();
+    expect($enAttente)->toHaveCount(1)
+        ->and($enAttente[0]->type->value)->toBe('annulation');
+});
+
+it('ne garde que les annulations des plats déjà partis en cuisine', function () {
+    $ctx = bonSalle();
+    bonEnvoyer($ctx, [[bonProduit($ctx, 'Poulet'), 1]]);
+    getJson("/api/points-de-vente/{$ctx->pdv->id}/bons-cuisine/pdf")->assertOk();
+    bonEnvoyer($ctx, [[bonProduit($ctx, 'Fondant'), 1]]);
+
+    postJson("/api/commandes-client/{$ctx->commande->id}/annuler", ['motif' => 'client parti'])->assertOk();
+
+    $enAttente = BonCuisine::query()->with('lignesAImprimer')->enAttente()->get();
+    expect($enAttente)->toHaveCount(1)
+        ->and($enAttente[0]->type->value)->toBe('annulation')
+        ->and($enAttente[0]->lignesAImprimer->pluck('produit_libelle')->all())->toBe(['Poulet']);
+});
+
+/**
+ * Un bon imprimé est un papier qui existe en cuisine : le service qui suit ne
+ * le modifie pas, et sa réimpression sort à l'identique.
+ */
+it('ne touche pas à un bon déjà imprimé', function () {
+    $ctx = bonSalle();
+    bonEnvoyer($ctx, [[bonProduit($ctx, 'Poulet'), 1]]);
+    $bon = BonCuisine::query()->sole();
+    getJson("/api/bons-cuisine/{$bon->id}/pdf")->assertOk();
+
+    postJson("/api/commandes-client/{$ctx->commande->id}/servir")->assertOk();
+
+    $bon->refresh()->load('lignes');
+    expect($bon->sans_objet_le)->toBeNull()
+        ->and($bon->lignes->pluck('sans_objet')->all())->toBe([false]);
+
+    getJson("/api/bons-cuisine/{$bon->id}/pdf")->assertOk();
+    expect($bon->fresh()->nombre_impressions)->toBe(2);
+});

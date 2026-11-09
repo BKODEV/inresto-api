@@ -21,10 +21,16 @@ class LigneBonCuisine extends Model
         'produit_libelle',
         'quantite',
         'commentaire',
+        'sans_objet',
+    ];
+
+    protected $attributes = [
+        'sans_objet' => false,
     ];
 
     protected $casts = [
         'quantite' => 'integer',
+        'sans_objet' => 'boolean',
     ];
 
     public function bon(): BelongsTo

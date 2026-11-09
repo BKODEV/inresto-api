@@ -124,6 +124,87 @@ class BonCuisineService
     }
 
     /**
+     * Retire de la file ce qui a perdu son objet avant d'être imprimé.
+     *
+     * Un bon qui attend à la caisse peut être dépassé par le service : le plat
+     * a été servi sans lui, ou annulé. L'imprimer ferait cuire une seconde fois
+     * ce qui est déjà parti. Rien n'est supprimé — le plat est marqué « sans
+     * objet » sur le bon, et le bon quitte la file quand il ne lui reste rien.
+     *
+     *  - envoi / ajout : un plat est sans objet dès que sa ligne est annulée ou
+     *    servie ;
+     *  - annulation : un plat est sans objet si le bon qui l'avait envoyé n'a
+     *    jamais été imprimé — la cuisine n'a rien à arrêter. Une ligne envoyée
+     *    avant l'existence des bons garde son annulation, faute de savoir.
+     *
+     * Seuls les bons JAMAIS imprimés sont concernés : un papier déjà en cuisine
+     * ne se rattrape pas, c'est le bon d'annulation qui s'en charge.
+     *
+     * Appelée après chaque geste qui peut rendre un bon inutile (service,
+     * annulation), et juste avant chaque impression.
+     *
+     * @param  array<int, int>  $commandeIds
+     */
+    public function reviserAttente(array $commandeIds): void
+    {
+        if ($commandeIds === []) {
+            return;
+        }
+
+        $bons = BonCuisine::query()
+            ->with('lignes.ligneCommande')
+            ->whereIn('commande_client_id', $commandeIds)
+            ->enAttente()
+            ->get();
+
+        // Les envois d'abord : une annulation se juge sur le sort du bon d'origine.
+        [$annulations, $envois] = $bons->partition(
+            fn (BonCuisine $bon): bool => $bon->type === TypeBonCuisine::Annulation
+        );
+
+        foreach ($envois as $bon) {
+            $this->marquerSansObjet($bon, function (LigneBonCuisine $ligne): bool {
+                $ligneCommande = $ligne->ligneCommande;
+
+                return $ligneCommande->statut !== Statut::Actif || $ligneCommande->estServie();
+            });
+        }
+
+        $origines = $this->bonsDOrigine(
+            new EloquentCollection($annulations->flatMap(
+                fn (BonCuisine $bon) => $bon->lignes->map(fn (LigneBonCuisine $ligne) => $ligne->ligneCommande)
+            )->all())
+        );
+
+        foreach ($annulations as $bon) {
+            $this->marquerSansObjet($bon, function (LigneBonCuisine $ligne) use ($origines): bool {
+                /** @var BonCuisine|null $origine */
+                $origine = $origines->get($ligne->ligne_commande_client_id);
+
+                return $origine !== null && $origine->imprime_le === null;
+            });
+        }
+    }
+
+    /**
+     * @param  \Closure(LigneBonCuisine): bool  $estSansObjet
+     */
+    private function marquerSansObjet(BonCuisine $bon, \Closure $estSansObjet): void
+    {
+        foreach ($bon->lignes as $ligne) {
+            if (! $ligne->sans_objet && $estSansObjet($ligne)) {
+                $ligne->sans_objet = true;
+                $ligne->save();
+            }
+        }
+
+        if ($bon->lignes->every(fn (LigneBonCuisine $ligne): bool => $ligne->sans_objet)) {
+            $bon->sans_objet_le = now();
+            $bon->save();
+        }
+    }
+
+    /**
      * Prend la file « à imprimer » d'un point de vente et la marque imprimée.
      *
      * Les bons sont verrouillés le temps de la lecture : deux clics sur
@@ -137,11 +218,15 @@ class BonCuisineService
         return DB::transaction(function () use ($pointDeVenteId): array {
             $ids = BonCuisine::query()
                 ->where('point_de_vente_id', $pointDeVenteId)
-                ->whereNull('imprime_le')
+                ->enAttente()
                 ->lockForUpdate()
                 ->pluck('id');
 
-            return $this->marquerImprimes($ids->all());
+            $this->reviserAttente($this->commandesDe($ids->all()));
+
+            return $this->marquerImprimes(
+                BonCuisine::query()->whereKey($ids)->enAttente()->pluck('id')->all()
+            );
         });
     }
 
@@ -156,7 +241,29 @@ class BonCuisineService
      */
     public function imprimer(array $ids): array
     {
-        return DB::transaction(fn (): array => $this->marquerImprimes($ids));
+        return DB::transaction(function () use ($ids): array {
+            $this->reviserAttente($this->commandesDe($ids));
+
+            // Un bon devenu sans objet sans jamais être sorti n'a rien à
+            // imprimer : il est écarté. Celui qui a été imprimé reste
+            // réimprimable — c'est un papier qui existe en cuisine.
+            $imprimables = BonCuisine::query()
+                ->whereKey($ids)
+                ->where(fn ($query) => $query->whereNotNull('imprime_le')->orWhereNull('sans_objet_le'))
+                ->pluck('id')
+                ->all();
+
+            return $this->marquerImprimes($imprimables);
+        });
+    }
+
+    /**
+     * @param  array<int, int>  $bonIds
+     * @return array<int, int>
+     */
+    private function commandesDe(array $bonIds): array
+    {
+        return BonCuisine::query()->whereKey($bonIds)->distinct()->pluck('commande_client_id')->all();
     }
 
     /**
@@ -166,7 +273,7 @@ class BonCuisineService
     private function marquerImprimes(array $ids): array
     {
         $bons = BonCuisine::query()
-            ->with(['lignes', 'commande.user'])
+            ->with(['lignesAImprimer', 'commande.user'])
             ->whereKey($ids)
             ->lockForUpdate()
             ->orderBy('emis_le')

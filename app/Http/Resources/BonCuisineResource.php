@@ -38,6 +38,9 @@ class BonCuisineResource extends JsonResource
             'imprime_le' => $this->imprime_le?->toIso8601String(),
             'nombre_impressions' => $this->nombre_impressions,
             'a_imprimer' => $this->estAImprimer(),
+            // Devenu inutile avant d'être imprimé : servi ou annulé sans lui.
+            'sans_objet' => $this->estSansObjet(),
+            'sans_objet_le' => $this->sans_objet_le?->toIso8601String(),
             // Figé sur la note à son ouverture : la table peut avoir été renumérotée.
             'table_numero' => $this->whenLoaded('commande', fn (): ?string => $this->commande->table_numero),
             'serveur' => $this->whenLoaded('commande', fn (): ?string => $nom($this->commande->user)),
@@ -51,6 +54,7 @@ class BonCuisineResource extends JsonResource
                         'produit_libelle' => $ligne->produit_libelle,
                         'quantite' => $ligne->quantite,
                         'commentaire' => $ligne->commentaire,
+                        'sans_objet' => $ligne->sans_objet,
                     ])
                     ->all(),
             ),

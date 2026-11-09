@@ -205,8 +205,8 @@ class PdfService
         $parRemarque = 22.0;
 
         return $entete
-            + $bon->lignes->count() * $parPlat
-            + $bon->lignes->filter(fn ($ligne): bool => filled($ligne->commentaire))->count() * $parRemarque;
+            + $bon->lignesAImprimer->count() * $parPlat
+            + $bon->lignesAImprimer->filter(fn ($ligne): bool => filled($ligne->commentaire))->count() * $parRemarque;
     }
 
     /**

@@ -8,7 +8,7 @@
      * Lu debout, à un mètre, les mains prises : le POSTE en tête sur fond noir
      * (c'est ce qui trie les papiers tant qu'ils sortent tous à la caisse), les
      * quantités et les remarques en gros. Aucun prix : la cuisine n'en a pas
-     * l'usage.
+     * l'usage. Les plats servis ou annulés avant l'impression n'y figurent pas.
      *
      * @var \Illuminate\Support\Collection<int, \App\Models\BonCuisine> $bons
      * @var array<int, bool> $duplicatas  identifiants des bons déjà imprimés
@@ -76,7 +76,7 @@
         <div class="sep"></div>
 
         <table>
-            @foreach ($bon->lignes as $ligne)
+            @foreach ($bon->lignesAImprimer as $ligne)
                 <tr>
                     <td class="qte">{{ $ligne->quantite }}×</td>
                     <td class="plat {{ $estAnnulation ? 'barre' : '' }}">{{ $ligne->produit_libelle }}</td>

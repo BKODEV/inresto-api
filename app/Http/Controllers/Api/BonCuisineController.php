@@ -51,7 +51,7 @@ class BonCuisineController extends Controller
             ->where('point_de_vente_id', $point_de_vente->id)
             ->when(
                 $filtres['a_imprimer'] ?? false,
-                fn ($query) => $query->whereNull('imprime_le'),
+                fn ($query) => $query->enAttente(),
                 fn ($query) => $query->whereDate('jour', $filtres['jour'] ?? Carbon::today()->toDateString()),
             )
             ->orderBy('emis_le')
@@ -98,7 +98,7 @@ class BonCuisineController extends Controller
             : $this->service->imprimer($demandes);
 
         if ($resultat['bons']->isEmpty()) {
-            return ApiResponse::custom(409, 'error', 'Aucun bon en attente d\'impression.');
+            return ApiResponse::custom(409, 'error', 'Aucun bon à imprimer : la file est vide, ou ses plats ont été servis ou annulés entre-temps.');
         }
 
         return $this->pdf->bonsCuisine(
@@ -116,6 +116,11 @@ class BonCuisineController extends Controller
         $this->verifierPerimetre($request, (int) $bon_cuisine->point_de_vente_id);
 
         $resultat = $this->service->imprimer([$bon_cuisine->id]);
+
+        // Servi ou annulé avant d'avoir été sorti : rien à mettre sur le papier.
+        if ($resultat['bons']->isEmpty()) {
+            return ApiResponse::custom(409, 'error', 'Ce bon est sans objet : ses plats ont été servis ou annulés avant son impression.');
+        }
 
         return $this->pdf->bonsCuisine(
             $resultat['bons'],
