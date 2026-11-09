@@ -20,6 +20,7 @@ class PosteCuisineResource extends JsonResource
             'point_de_vente_id' => $this->point_de_vente_id,
             'libelle' => $this->libelle,
             'ordre' => $this->ordre,
+            'par_defaut' => $this->par_defaut,
             'statut' => $this->statut->value,
             // Les catégories rattachées : c'est ce que l'écran de paramétrage
             // coche, et ce qui filtre ensuite le KDS.

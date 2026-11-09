@@ -355,3 +355,158 @@ it('refuse le personnel sans le droit de lire les postes', function () {
 
     getJson("/api/points-de-vente/{$pdv->id}/personnel")->assertForbidden();
 });
+
+// ───────────────────────── poste par défaut ─────────────────────────
+
+/**
+ * Le poste par défaut reçoit, sur les bons, ce que personne d'autre ne
+ * produit. Un pass qui déclare des postes en a donc toujours un.
+ */
+it('fait du premier poste d\'un point de vente le poste par défaut', function () {
+    $site = Site::factory()->create();
+    $pdv = PointDeVente::factory()->create(['site_id' => $site->id]);
+    actingAsChef($site);
+
+    postJson('/api/parametres/postes-cuisine', ['point_de_vente_id' => $pdv->id, 'libelle' => 'Chaud'])
+        ->assertCreated()
+        ->assertJsonPath('data.par_defaut', true);
+
+    postJson('/api/parametres/postes-cuisine', ['point_de_vente_id' => $pdv->id, 'libelle' => 'Froid'])
+        ->assertCreated()
+        ->assertJsonPath('data.par_defaut', false);
+});
+
+it('transfère la charge quand un autre poste devient le poste par défaut', function () {
+    $site = Site::factory()->create();
+    $pdv = PointDeVente::factory()->create(['site_id' => $site->id]);
+    actingAsChef($site);
+    $chaud = PosteCuisine::factory()->create(['point_de_vente_id' => $pdv->id, 'par_defaut' => true]);
+    $froid = PosteCuisine::factory()->create(['point_de_vente_id' => $pdv->id]);
+
+    putJson("/api/parametres/postes-cuisine/{$froid->id}", ['par_defaut' => true])
+        ->assertOk()
+        ->assertJsonPath('data.par_defaut', true);
+
+    expect($chaud->fresh()->par_defaut)->toBeFalse();
+});
+
+it('ne touche pas au poste par défaut d\'un autre point de vente', function () {
+    $site = Site::factory()->create();
+    $pdv = PointDeVente::factory()->create(['site_id' => $site->id]);
+    $autrePdv = PointDeVente::factory()->create(['site_id' => $site->id]);
+    actingAsChef($site);
+    $ailleurs = PosteCuisine::factory()->create(['point_de_vente_id' => $autrePdv->id, 'par_defaut' => true]);
+    PosteCuisine::factory()->create(['point_de_vente_id' => $pdv->id, 'par_defaut' => true]);
+
+    postJson('/api/parametres/postes-cuisine', ['point_de_vente_id' => $pdv->id, 'libelle' => 'Bar', 'par_defaut' => true])
+        ->assertCreated();
+
+    expect($ailleurs->fresh()->par_defaut)->toBeTrue()
+        ->and(PosteCuisine::query()->where('point_de_vente_id', $pdv->id)->where('par_defaut', true)->count())->toBe(1);
+});
+
+it('refuse de retirer la charge sans désigner un autre poste (422)', function () {
+    $site = Site::factory()->create();
+    $pdv = PointDeVente::factory()->create(['site_id' => $site->id]);
+    actingAsChef($site);
+    $poste = PosteCuisine::factory()->create(['point_de_vente_id' => $pdv->id, 'par_defaut' => true]);
+
+    putJson("/api/parametres/postes-cuisine/{$poste->id}", ['par_defaut' => false])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('par_defaut');
+});
+
+it('refuse de désactiver le poste par défaut (422)', function () {
+    $site = Site::factory()->create();
+    $pdv = PointDeVente::factory()->create(['site_id' => $site->id]);
+    actingAsChef($site);
+    $poste = PosteCuisine::factory()->create(['point_de_vente_id' => $pdv->id, 'par_defaut' => true]);
+
+    putJson("/api/parametres/postes-cuisine/{$poste->id}", ['statut' => 'inactif'])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('statut');
+});
+
+it('refuse de supprimer le poste par défaut tant qu\'il en reste d\'autres (409)', function () {
+    $site = Site::factory()->create();
+    $pdv = PointDeVente::factory()->create(['site_id' => $site->id]);
+    actingAsChef($site);
+    $defaut = PosteCuisine::factory()->create(['point_de_vente_id' => $pdv->id, 'par_defaut' => true]);
+    PosteCuisine::factory()->create(['point_de_vente_id' => $pdv->id]);
+
+    deleteJson("/api/parametres/postes-cuisine/{$defaut->id}")->assertStatus(409);
+
+    expect(PosteCuisine::find($defaut->id))->not->toBeNull();
+});
+
+it('supprime le poste par défaut quand c\'est le dernier', function () {
+    $site = Site::factory()->create();
+    $pdv = PointDeVente::factory()->create(['site_id' => $site->id]);
+    actingAsChef($site);
+    $defaut = PosteCuisine::factory()->create(['point_de_vente_id' => $pdv->id, 'par_defaut' => true]);
+
+    deleteJson("/api/parametres/postes-cuisine/{$defaut->id}")->assertOk();
+});
+
+// ───────────────────────── une catégorie, un poste ─────────────────────────
+
+/**
+ * Sur papier, une catégorie produite par deux postes sortirait sur deux bons,
+ * et le plat serait cuit deux fois.
+ */
+it('refuse une catégorie déjà produite par un autre poste du point de vente (422)', function () {
+    $site = Site::factory()->create();
+    $pdv = PointDeVente::factory()->create(['site_id' => $site->id]);
+    actingAsChef($site);
+    $grillades = CategorieProduit::factory()->create();
+    PosteCuisine::factory()->create(['point_de_vente_id' => $pdv->id, 'libelle' => 'Chaud'])
+        ->categories()->sync([$grillades->id]);
+
+    postJson('/api/parametres/postes-cuisine', [
+        'point_de_vente_id' => $pdv->id,
+        'libelle' => 'Grill',
+        'categories' => [$grillades->id],
+    ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('categories.0')
+        ->assertJsonFragment(['Cette catégorie est déjà produite par le poste « Chaud ».']);
+});
+
+it('refuse de prendre à la mise à jour une catégorie d\'un autre poste (422)', function () {
+    $site = Site::factory()->create();
+    $pdv = PointDeVente::factory()->create(['site_id' => $site->id]);
+    actingAsChef($site);
+    $grillades = CategorieProduit::factory()->create();
+    PosteCuisine::factory()->create(['point_de_vente_id' => $pdv->id])->categories()->sync([$grillades->id]);
+    $grill = PosteCuisine::factory()->create(['point_de_vente_id' => $pdv->id]);
+
+    putJson("/api/parametres/postes-cuisine/{$grill->id}", ['categories' => [$grillades->id]])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('categories.0');
+});
+
+it('laisse un poste reposer ses propres catégories', function () {
+    $site = Site::factory()->create();
+    $pdv = PointDeVente::factory()->create(['site_id' => $site->id]);
+    actingAsChef($site);
+    $grillades = CategorieProduit::factory()->create();
+    $chaud = PosteCuisine::factory()->create(['point_de_vente_id' => $pdv->id]);
+    $chaud->categories()->sync([$grillades->id]);
+
+    putJson("/api/parametres/postes-cuisine/{$chaud->id}", ['categories' => [$grillades->id]])->assertOk();
+});
+
+it('accepte la même catégorie sur un autre point de vente', function () {
+    $site = Site::factory()->create();
+    $pdv = PointDeVente::factory()->create(['site_id' => $site->id]);
+    $rooftop = PointDeVente::factory()->create(['site_id' => $site->id]);
+    actingAsChef($site);
+    $cocktails = CategorieProduit::factory()->create();
+    PosteCuisine::factory()->create(['point_de_vente_id' => $pdv->id])->categories()->sync([$cocktails->id]);
+
+    postJson('/api/parametres/postes-cuisine', [
+        'point_de_vente_id' => $rooftop->id,
+        'libelle' => 'Bar',
+        'categories' => [$cocktails->id],
+    ])->assertCreated();
+});

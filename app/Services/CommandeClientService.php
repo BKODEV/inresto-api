@@ -36,6 +36,7 @@ class CommandeClientService
         private readonly StockService $stock,
         private readonly TableSalleService $tables,
         private readonly SessionCuisineService $sessionsCuisine,
+        private readonly BonCuisineService $bonsCuisine,
     ) {}
 
     /**
@@ -149,15 +150,18 @@ class CommandeClientService
      * de ce qui est déjà en production. Répétable autant de fois que le repas
      * compte de services.
      *
+     * Le tour donne naissance à ses bons de cuisine, un par poste concerné,
+     * dans la même transaction : pas de tour sans bon, pas de bon sans tour.
+     *
      * @param  array<int, array{produit_id: int, quantite: int, commentaire?: string|null}>  $lignes  Panier à créer avant l'envoi.
      *
      * @throws CommandeClientException
      */
-    public function envoyerEnCuisine(CommandeClient $commande, array $lignes, string $_userId): CommandeClient
+    public function envoyerEnCuisine(CommandeClient $commande, array $lignes, string $userId): CommandeClient
     {
         $this->assertNoteModifiable($commande);
 
-        return DB::transaction(function () use ($commande, $lignes): CommandeClient {
+        return DB::transaction(function () use ($commande, $lignes, $userId): CommandeClient {
             foreach ($lignes as $data) {
                 $this->creerLigne($commande, $data, null);
             }
@@ -188,6 +192,8 @@ class CommandeClientService
                 $ligne->session_cuisine_id = $sessionCuisine?->id;
                 $ligne->save();
             }
+
+            $this->bonsCuisine->emettreEnvoi($commande, $enAttente, $tour, $userId);
 
             $this->recalculerMontantTotal($commande);
             $this->rafraichirStatut($commande);

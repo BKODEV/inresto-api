@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Requests\PosteCuisine;
 
 use App\Enums\Statut;
-use App\Http\Requests\PosteCuisine\Concerns\ValideLesMembresDuPoste;
+use App\Http\Requests\PosteCuisine\Concerns\ValideLeRattachementDuPoste;
 use App\Models\PosteCuisine;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -13,7 +13,7 @@ use Illuminate\Validation\Rule;
 
 class UpdatePosteCuisineRequest extends FormRequest
 {
-    use ValideLesMembresDuPoste;
+    use ValideLeRattachementDuPoste;
 
     public function authorize(): bool
     {
@@ -45,9 +45,7 @@ class UpdatePosteCuisineRequest extends FormRequest
             ],
             'ordre' => ['sometimes', 'integer', 'min:0'],
             'statut' => ['sometimes', Rule::enum(Statut::class)],
-            // Absent = rattachement inchangé ; tableau vide = on détache tout.
-            'categories' => ['sometimes', 'array'],
-            'categories.*' => ['integer', 'exists:categories_produit,id'],
+            ...$this->reglesCategories(),
             ...$this->reglesMembres(),
         ];
     }

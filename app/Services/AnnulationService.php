@@ -15,6 +15,7 @@ use App\Models\CommandeClient;
 use App\Models\FicheTechnique;
 use App\Models\LigneCommandeClient;
 use App\Models\Stock;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -31,6 +32,7 @@ class AnnulationService
     public function __construct(
         private readonly StockService $stock,
         private readonly TableSalleService $tables,
+        private readonly BonCuisineService $bonsCuisine,
     ) {}
 
     /**
@@ -85,6 +87,10 @@ class AnnulationService
             $ligne->statut = Statut::Inactif;
             $ligne->save();
 
+            // Le poste qui a reçu le plat doit apprendre qu'il ne faut plus le
+            // faire. Sans effet si la ligne était déjà servie.
+            $this->bonsCuisine->emettreAnnulation($commande, new EloquentCollection([$ligne]), $userId);
+
             $this->recalculerMontantTotal($commande);
 
             return $annulation;
@@ -106,7 +112,13 @@ class AnnulationService
         }
 
         return DB::transaction(function () use ($commande, $data, $userId): Annulation {
+            // Relevées AVANT d'être inactivées : ce sont les lignes encore en
+            // production que les postes doivent arrêter.
+            $lignesActives = $commande->lignes()->where('statut', Statut::Actif->value)->get();
+
             $commande->lignes()->where('statut', Statut::Actif->value)->update(['statut' => Statut::Inactif->value]);
+
+            $this->bonsCuisine->emettreAnnulation($commande, $lignesActives, $userId);
 
             $commande->statut = StatutCommandeClient::Annulee;
             $commande->montant_total = 0;

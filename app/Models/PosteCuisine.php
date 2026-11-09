@@ -16,7 +16,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
  *
  * Taxonomie de PRODUCTION, distincte de la taxonomie commerciale que sont les
  * catégories de produit. Les catégories s'y rattachent par un pivot ; une
- * catégorie non rattachée reste visible de tous les postes.
+ * catégorie non rattachée reste visible de tous les postes à l'écran.
+ *
+ * Sur un bon de cuisine, en revanche, une ligne ne va qu'à UN poste : une
+ * catégorie ne se rattache donc qu'à un seul poste par point de vente, et ce
+ * qui n'est rattaché à personne part au poste PAR DÉFAUT (un par point de
+ * vente, toujours actif).
  */
 class PosteCuisine extends Model
 {
@@ -29,16 +34,19 @@ class PosteCuisine extends Model
         'point_de_vente_id',
         'libelle',
         'ordre',
+        'par_defaut',
         'statut',
     ];
 
     protected $attributes = [
         'ordre' => 0,
+        'par_defaut' => false,
         'statut' => Statut::Actif->value,
     ];
 
     protected $casts = [
         'ordre' => 'integer',
+        'par_defaut' => 'boolean',
         'statut' => Statut::class,
     ];
 

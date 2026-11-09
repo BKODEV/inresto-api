@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AnnulationController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\BonCuisineController;
 use App\Http\Controllers\Api\BudgetController;
 use App\Http\Controllers\Api\CarteProduitController;
 use App\Http\Controllers\Api\CatalogueFournisseurController;
@@ -243,6 +244,11 @@ Route::middleware('auth:sanctum')->group(function () {
         ->name('commandes-client.servir');
     Route::post('commandes-client/{commande}/encaisser', [CommandeClientController::class, 'encaisser'])
         ->name('commandes-client.encaisser');
+    // Bons de cuisine : en lecture seule, ils naissent de l'envoi et de l'annulation.
+    Route::get('commandes-client/{commande}/bons-cuisine', [BonCuisineController::class, 'index'])
+        ->name('commandes-client.bons-cuisine.index');
+    Route::get('bons-cuisine/{bon_cuisine}', [BonCuisineController::class, 'show'])
+        ->name('bons-cuisine.show');
     Route::get('kds/{point_de_vente}', [CommandeClientController::class, 'kds'])
         ->name('kds.index');
     // Le pendant salle du KDS : ce qui est prêt et attend d'être emporté.
