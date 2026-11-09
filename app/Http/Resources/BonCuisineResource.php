@@ -35,6 +35,9 @@ class BonCuisineResource extends JsonResource
             'partie' => $this->partie,
             'parties' => $this->parties,
             'emis_le' => $this->emis_le?->toIso8601String(),
+            'imprime_le' => $this->imprime_le?->toIso8601String(),
+            'nombre_impressions' => $this->nombre_impressions,
+            'a_imprimer' => $this->estAImprimer(),
             // Figé sur la note à son ouverture : la table peut avoir été renumérotée.
             'table_numero' => $this->whenLoaded('commande', fn (): ?string => $this->commande->table_numero),
             'serveur' => $this->whenLoaded('commande', fn (): ?string => $nom($this->commande->user)),

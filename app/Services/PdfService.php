@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Enums\TypeImpression;
+use App\Models\BonCuisine;
 use App\Models\CatalogueFournisseur;
 use App\Models\CommandeClient;
 use App\Models\CommandeFournisseur;
@@ -157,6 +158,55 @@ class PdfService
             $this->htmlRapportFermeture($session),
             "rapport-fermeture-{$session->id}.pdf"
         );
+    }
+
+    /**
+     * Bons de cuisine 80mm, un par page.
+     *
+     * Aucun en-tête d'établissement : le bon ne quitte pas la cuisine.
+     *
+     * @param  Collection<int, BonCuisine>  $bons
+     * @param  array<int, bool>  $duplicatas  identifiants des bons déjà imprimés auparavant
+     */
+    public function htmlBonsCuisine(Collection $bons, array $duplicatas = []): string
+    {
+        return View::make('pdf.bon-cuisine', [
+            'bons' => $bons,
+            'duplicatas' => $duplicatas,
+        ])->render();
+    }
+
+    /**
+     * Le papier est à la hauteur du bon le plus long, et non aux 800pt du reçu :
+     * dompdf impose la même taille à toutes les pages, et une impression en lot
+     * de dix bons déroulerait sinon près de trois mètres de rouleau.
+     *
+     * @param  Collection<int, BonCuisine>  $bons
+     * @param  array<int, bool>  $duplicatas
+     */
+    public function bonsCuisine(Collection $bons, array $duplicatas, string $nomFichier): Response
+    {
+        $hauteur = $bons->max(fn (BonCuisine $bon): float => self::hauteurBon($bon)) ?? 200.0;
+
+        return Pdf::loadHTML($this->htmlBonsCuisine($bons, $duplicatas))
+            ->setPaper([0, 0, 226.77, $hauteur])
+            ->stream($nomFichier);
+    }
+
+    /**
+     * Estimation généreuse, en points, de la hauteur d'un bon : en-tête fixe,
+     * puis une rangée par plat et une par remarque. Un libellé long passe sur
+     * deux lignes, d'où la marge par plat.
+     */
+    private static function hauteurBon(BonCuisine $bon): float
+    {
+        $entete = 130.0;
+        $parPlat = 30.0;
+        $parRemarque = 22.0;
+
+        return $entete
+            + $bon->lignes->count() * $parPlat
+            + $bon->lignes->filter(fn ($ligne): bool => filled($ligne->commentaire))->count() * $parRemarque;
     }
 
     /**

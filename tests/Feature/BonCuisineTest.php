@@ -17,6 +17,7 @@ use App\Models\SessionCaisse;
 use App\Models\Site;
 use App\Models\TableSalle;
 use App\Models\User;
+use App\Services\PdfService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
@@ -347,4 +348,172 @@ it('refuse les bons d\'un site hors périmètre', function () {
     Sanctum::actingAs($ailleurs);
 
     getJson("/api/bons-cuisine/{$bon->id}")->assertForbidden();
+});
+
+// ───────────────────────── impression ─────────────────────────
+
+/**
+ * La file de la caisse : ce que les serveurs ont envoyé et que personne n'a
+ * encore sorti. C'est elle qui garantit qu'aucun envoi n'est oublié.
+ */
+it('sert la file des bons à imprimer du point de vente', function () {
+    $ctx = bonSalle();
+    bonEnvoyer($ctx, [[bonProduit($ctx, 'Poulet'), 1]]);
+    bonEnvoyer($ctx, [[bonProduit($ctx, 'Fondant'), 1]]);
+    BonCuisine::query()->where('numero', 1)->update(['imprime_le' => now(), 'nombre_impressions' => 1]);
+
+    getJson("/api/points-de-vente/{$ctx->pdv->id}/bons-cuisine?a_imprimer=1")
+        ->assertOk()
+        ->assertJsonCount(1, 'data')
+        ->assertJsonPath('data.0.numero', 2)
+        ->assertJsonPath('data.0.a_imprimer', true);
+});
+
+it('garde dans la file un bon oublié la veille', function () {
+    $ctx = bonSalle();
+    bonEnvoyer($ctx, [[bonProduit($ctx, 'Poulet'), 1]]);
+    $this->travel(1)->days();
+
+    getJson("/api/points-de-vente/{$ctx->pdv->id}/bons-cuisine?a_imprimer=1")
+        ->assertOk()
+        ->assertJsonCount(1, 'data');
+
+    getJson("/api/points-de-vente/{$ctx->pdv->id}/bons-cuisine")
+        ->assertOk()
+        ->assertJsonCount(0, 'data');
+});
+
+it('imprime toute la file et la vide', function () {
+    $ctx = bonSalle();
+    bonEnvoyer($ctx, [[bonProduit($ctx, 'Poulet'), 1]]);
+    bonEnvoyer($ctx, [[bonProduit($ctx, 'Fondant'), 1]]);
+
+    getJson("/api/points-de-vente/{$ctx->pdv->id}/bons-cuisine/pdf")
+        ->assertOk()
+        ->assertHeader('content-type', 'application/pdf');
+
+    expect(BonCuisine::query()->whereNull('imprime_le')->count())->toBe(0)
+        ->and(BonCuisine::query()->pluck('nombre_impressions')->unique()->all())->toBe([1]);
+});
+
+/**
+ * Deux clics sur « imprimer tout » ne sortent pas deux fois la même file : le
+ * second ne trouve plus rien.
+ */
+it('répond 409 quand la file est vide', function () {
+    $ctx = bonSalle();
+    bonEnvoyer($ctx, [[bonProduit($ctx, 'Poulet'), 1]]);
+    getJson("/api/points-de-vente/{$ctx->pdv->id}/bons-cuisine/pdf")->assertOk();
+
+    getJson("/api/points-de-vente/{$ctx->pdv->id}/bons-cuisine/pdf")->assertStatus(409);
+});
+
+it('imprime des bons précis sans toucher au reste de la file', function () {
+    $ctx = bonSalle();
+    bonEnvoyer($ctx, [[bonProduit($ctx, 'Poulet'), 1]]);
+    bonEnvoyer($ctx, [[bonProduit($ctx, 'Fondant'), 1]]);
+    $premier = BonCuisine::query()->where('numero', 1)->sole();
+
+    getJson("/api/points-de-vente/{$ctx->pdv->id}/bons-cuisine/pdf?bons[]={$premier->id}")->assertOk();
+
+    expect($premier->fresh()->imprime_le)->not->toBeNull()
+        ->and(BonCuisine::query()->where('numero', 2)->sole()->imprime_le)->toBeNull();
+});
+
+it('refuse d\'imprimer le bon d\'un autre point de vente (422)', function () {
+    $ctx = bonSalle();
+    $etranger = BonCuisine::factory()->create([
+        'point_de_vente_id' => PointDeVente::factory()->create(['site_id' => $ctx->site->id])->id,
+    ]);
+
+    getJson("/api/points-de-vente/{$ctx->pdv->id}/bons-cuisine/pdf?bons[]={$etranger->id}")
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('bons');
+});
+
+it('réimprime un bon en duplicata', function () {
+    $ctx = bonSalle();
+    bonEnvoyer($ctx, [[bonProduit($ctx, 'Poulet'), 1]]);
+    $bon = BonCuisine::query()->sole();
+
+    getJson("/api/bons-cuisine/{$bon->id}/pdf")->assertOk()->assertHeader('content-type', 'application/pdf');
+    $premiereFois = $bon->fresh()->imprime_le;
+
+    $this->travel(5)->minutes();
+    getJson("/api/bons-cuisine/{$bon->id}/pdf")->assertOk();
+
+    $bon->refresh();
+    expect($bon->nombre_impressions)->toBe(2)
+        ->and($bon->imprime_le->equalTo($premiereFois))->toBeTrue();
+});
+
+it('refuse l\'impression d\'un bon hors périmètre', function () {
+    $ctx = bonSalle();
+    bonEnvoyer($ctx, [[bonProduit($ctx, 'Poulet'), 1]]);
+    $bon = BonCuisine::query()->sole();
+
+    $ailleurs = User::factory()->create();
+    $ailleurs->givePermissionTo('commande_client.view');
+    $ailleurs->sites()->attach(Site::factory()->create()->id);
+    Sanctum::actingAs($ailleurs);
+
+    getJson("/api/bons-cuisine/{$bon->id}/pdf")->assertForbidden();
+    getJson("/api/points-de-vente/{$ctx->pdv->id}/bons-cuisine/pdf")->assertForbidden();
+
+    expect($bon->fresh()->imprime_le)->toBeNull();
+});
+
+// ───────────────────────── gabarit 80mm ─────────────────────────
+
+it('met le poste en tête, la table, le numéro et les remarques, sans prix', function () {
+    $ctx = bonSalle();
+    $plats = CategorieProduit::factory()->create();
+    bonPoste($ctx, 'Chaud', [$plats], ['par_defaut' => true]);
+    bonEnvoyer($ctx, [[bonProduit($ctx, 'Poulet braisé', $plats), 2, 'sans piment']]);
+    $bon = BonCuisine::query()->with(['lignes', 'commande.user'])->sole();
+
+    $html = app(PdfService::class)->htmlBonsCuisine(collect([$bon]));
+
+    expect($html)
+        ->toContain('Chaud')
+        ->toContain('Table '.$ctx->table->numero)
+        ->toContain('N° 1')
+        ->toContain('Poulet braisé')
+        ->toContain('sans piment')
+        ->toContain('Kouassi A.')
+        ->not->toContain('DUPLICATA')
+        ->not->toContain('5 000')
+        ->not->toContain('5000');
+});
+
+it('signale l\'ajout, l\'annulation et le duplicata', function () {
+    $ctx = bonSalle();
+    bonEnvoyer($ctx, [[bonProduit($ctx, 'Poulet'), 1]]);
+    bonEnvoyer($ctx, [[bonProduit($ctx, 'Fondant'), 1]]);
+    $ligne = LigneCommandeClient::query()->orderBy('id')->first();
+    deleteJson("/api/commandes-client/{$ctx->commande->id}/lignes/{$ligne->id}", ['motif' => 'erreur'])->assertOk();
+
+    $bons = BonCuisine::query()->with(['lignes', 'commande.user'])->orderBy('numero')->get();
+    $html = app(PdfService::class)->htmlBonsCuisine($bons, [$bons[0]->id => true]);
+
+    expect($html)
+        ->toContain('*** AJOUT ***')
+        ->toContain('*** ANNULATION ***')
+        ->toContain('DUPLICATA');
+});
+
+it('indique au poste la part de la table qu\'il prépare', function () {
+    $ctx = bonSalle();
+    $entrees = CategorieProduit::factory()->create();
+    $plats = CategorieProduit::factory()->create();
+    bonPoste($ctx, 'Froid', [$entrees], ['ordre' => 1, 'par_defaut' => true]);
+    bonPoste($ctx, 'Chaud', [$plats], ['ordre' => 2]);
+    bonEnvoyer($ctx, [
+        [bonProduit($ctx, 'Salade', $entrees), 1],
+        [bonProduit($ctx, 'Poulet', $plats), 1],
+    ]);
+
+    $html = app(PdfService::class)->htmlBonsCuisine(BonCuisine::query()->with(['lignes', 'commande.user'])->orderBy('numero')->get());
+
+    expect($html)->toContain('Bon 1/2')->toContain('Bon 2/2');
 });

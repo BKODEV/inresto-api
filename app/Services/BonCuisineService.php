@@ -15,6 +15,7 @@ use App\Models\PosteCuisine;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Émet les bons de cuisine : découpe un envoi (ou une annulation) en un bon par
@@ -120,6 +121,69 @@ class BonCuisineService
             ]);
 
         return $this->emettre($commande, $pointDeVenteId, TypeBonCuisine::Annulation, $groupes, now(), $userId);
+    }
+
+    /**
+     * Prend la file « à imprimer » d'un point de vente et la marque imprimée.
+     *
+     * Les bons sont verrouillés le temps de la lecture : deux clics sur
+     * « imprimer tout », ou deux caisses, ne sortent pas deux fois la même file
+     * — le second trouve la file vide.
+     *
+     * @return array{bons: Collection<int, BonCuisine>, duplicatas: array<int, bool>}
+     */
+    public function prendreAImprimer(int $pointDeVenteId): array
+    {
+        return DB::transaction(function () use ($pointDeVenteId): array {
+            $ids = BonCuisine::query()
+                ->where('point_de_vente_id', $pointDeVenteId)
+                ->whereNull('imprime_le')
+                ->lockForUpdate()
+                ->pluck('id');
+
+            return $this->marquerImprimes($ids->all());
+        });
+    }
+
+    /**
+     * Imprime des bons précis — une réimpression, ou les bons d'une note.
+     *
+     * Un bon déjà sorti revient en DUPLICATA : en cuisine, il ne doit pas être
+     * pris pour une nouvelle commande.
+     *
+     * @param  array<int, int>  $ids
+     * @return array{bons: Collection<int, BonCuisine>, duplicatas: array<int, bool>}
+     */
+    public function imprimer(array $ids): array
+    {
+        return DB::transaction(fn (): array => $this->marquerImprimes($ids));
+    }
+
+    /**
+     * @param  array<int, int>  $ids
+     * @return array{bons: Collection<int, BonCuisine>, duplicatas: array<int, bool>}
+     */
+    private function marquerImprimes(array $ids): array
+    {
+        $bons = BonCuisine::query()
+            ->with(['lignes', 'commande.user'])
+            ->whereKey($ids)
+            ->lockForUpdate()
+            ->orderBy('emis_le')
+            ->orderBy('numero')
+            ->get();
+
+        $duplicatas = [];
+        $maintenant = now();
+
+        foreach ($bons as $bon) {
+            $duplicatas[$bon->id] = $bon->nombre_impressions > 0;
+            $bon->imprime_le ??= $maintenant;
+            $bon->nombre_impressions++;
+            $bon->save();
+        }
+
+        return ['bons' => $bons->toBase(), 'duplicatas' => $duplicatas];
     }
 
     /**

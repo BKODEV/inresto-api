@@ -38,6 +38,8 @@ class BonCuisine extends Model
         'parties',
         'user_id',
         'emis_le',
+        'imprime_le',
+        'nombre_impressions',
     ];
 
     protected $casts = [
@@ -47,7 +49,19 @@ class BonCuisine extends Model
         'partie' => 'integer',
         'parties' => 'integer',
         'emis_le' => 'datetime',
+        'imprime_le' => 'datetime',
+        'nombre_impressions' => 'integer',
     ];
+
+    protected $attributes = [
+        'nombre_impressions' => 0,
+    ];
+
+    /** Encore à la caisse : personne ne l'a sorti. */
+    public function estAImprimer(): bool
+    {
+        return $this->imprime_le === null;
+    }
 
     public function commande(): BelongsTo
     {

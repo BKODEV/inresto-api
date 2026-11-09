@@ -249,6 +249,13 @@ Route::middleware('auth:sanctum')->group(function () {
         ->name('commandes-client.bons-cuisine.index');
     Route::get('bons-cuisine/{bon_cuisine}', [BonCuisineController::class, 'show'])
         ->name('bons-cuisine.show');
+    Route::get('bons-cuisine/{bon_cuisine}/pdf', [BonCuisineController::class, 'imprimer'])
+        ->name('bons-cuisine.pdf');
+    // La file de la caisse, et son impression en lot.
+    Route::get('points-de-vente/{point_de_vente}/bons-cuisine', [BonCuisineController::class, 'pointDeVente'])
+        ->name('points-de-vente.bons-cuisine.index');
+    Route::get('points-de-vente/{point_de_vente}/bons-cuisine/pdf', [BonCuisineController::class, 'imprimerLot'])
+        ->name('points-de-vente.bons-cuisine.pdf');
     Route::get('kds/{point_de_vente}', [CommandeClientController::class, 'kds'])
         ->name('kds.index');
     // Le pendant salle du KDS : ce qui est prêt et attend d'être emporté.
