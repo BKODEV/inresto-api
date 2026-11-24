@@ -14,6 +14,13 @@ class CategorieProduitSeeder extends Seeder
 {
     public function run(): void
     {
+        // Défauts d'une instance neuve : dès que la table a servi, on n'y touche
+        // plus, sinon un élément supprimé ou renommé en prod reviendrait à
+        // chaque déploiement.
+        if (CategorieProduit::query()->exists()) {
+            return;
+        }
+
         collect(['Entrées', 'Plats', 'Desserts', 'Boissons'])
             ->each(fn (string $libelle, int $i) => CategorieProduit::query()->firstOrCreate(
                 ['libelle' => $libelle],

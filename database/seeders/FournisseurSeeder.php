@@ -13,6 +13,13 @@ class FournisseurSeeder extends Seeder
 {
     public function run(): void
     {
+        // Défauts d'une instance neuve : dès que la table a servi, on n'y touche
+        // plus, sinon un élément supprimé ou renommé en prod reviendrait à
+        // chaque déploiement.
+        if (Fournisseur::withTrashed()->exists()) {
+            return;
+        }
+
         collect([
             [
                 'nom' => 'Marché de gros Abidjan',

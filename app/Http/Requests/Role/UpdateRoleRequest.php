@@ -21,11 +21,16 @@ class UpdateRoleRequest extends FormRequest
      */
     public function rules(): array
     {
-        $roleId = $this->route('role')->getKey();
+        $role = $this->route('role');
+        $roleId = $role->getKey();
         $niveauMaxAutorise = $this->user()->niveauMax() - 1;
 
         return [
-            'name' => ['sometimes', 'required', 'string', 'max:255', Rule::unique('roles', 'name')->ignore($roleId)],
+            // Le nom d'un rôle système est son identifiant dans le code (Role::NIVEAUX,
+            // RoleSeeder) : renommé, il serait recréé sous son nom d'origine.
+            'name' => $role->is_system
+                ? ['sometimes', 'required', 'string', Rule::in([$role->name])]
+                : ['sometimes', 'required', 'string', 'max:255', Rule::unique('roles', 'name')->ignore($roleId)],
             'description' => ['sometimes', 'nullable', 'string'],
             'niveau' => ['sometimes', 'required', 'integer', 'min:0', "max:{$niveauMaxAutorise}"],
             'permissions' => ['sometimes', 'array'],

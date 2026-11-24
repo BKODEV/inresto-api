@@ -16,6 +16,13 @@ class MatierePremiereSeeder extends Seeder
 {
     public function run(): void
     {
+        // Défauts d'une instance neuve : dès que la table a servi, on n'y touche
+        // plus, sinon un élément supprimé ou renommé en prod reviendrait à
+        // chaque déploiement.
+        if (MatierePremiere::withTrashed()->exists()) {
+            return;
+        }
+
         $categories = CategorieMatierePremiere::query()->get()->keyBy('libelle');
         $unites = UniteDeMesure::query()->get()->keyBy('symbole');
 

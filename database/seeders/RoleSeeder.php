@@ -10,11 +10,13 @@ use Spatie\Permission\Models\Permission;
 use Spatie\Permission\PermissionRegistrar;
 
 /**
- * Crée / met à jour les 6 rôles système (livrés, non supprimables) avec leur
- * description, leur niveau de sécurité et un jeu de permissions cohérent.
+ * Crée les 6 rôles système (livrés, non supprimables) avec leur description,
+ * leur niveau de sécurité et un jeu de permissions cohérent.
  *
- * Idempotent : relançable sans duplication ni perte. Suppose que les permissions
- * existent déjà (lancer {@see PermissionSeeder} avant).
+ * Tourne à chaque déploiement : un rôle déjà en place n'est jamais réécrit
+ * (description, niveau et permissions réglés en prod sont conservés). Il reçoit
+ * seulement les permissions que {@see PermissionSeeder} vient de créer et que
+ * sa définition prévoit. Le super-admin, lui, a toujours toutes les permissions.
  */
 class RoleSeeder extends Seeder
 {
@@ -24,7 +26,7 @@ class RoleSeeder extends Seeder
 
         foreach ($this->definitions() as $name => $def) {
             /** @var Role $role */
-            $role = Role::query()->updateOrCreate(
+            $role = Role::query()->firstOrCreate(
                 ['name' => $name, 'guard_name' => 'api'],
                 [
                     'description' => $def['description'],
@@ -33,11 +35,13 @@ class RoleSeeder extends Seeder
                 ],
             );
 
-            $permissions = $name === Role::SUPER_ADMIN
-                ? Permission::query()->where('guard_name', 'api')->get()
-                : $def['permissions'];
-
-            $role->syncPermissions($permissions);
+            if ($name === Role::SUPER_ADMIN) {
+                $role->syncPermissions(Permission::query()->where('guard_name', 'api')->get());
+            } elseif ($role->wasRecentlyCreated) {
+                $role->syncPermissions($def['permissions']);
+            } else {
+                $role->givePermissionTo(array_values(array_intersect($def['permissions'], PermissionSeeder::$creees)));
+            }
         }
     }
 

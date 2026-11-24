@@ -16,10 +16,11 @@ class SiteSeeder extends Seeder
 {
     public function run(): void
     {
-        $site = Site::query()->firstOrCreate(
-            ['code' => 'PRINCIPAL'],
-            ['nom' => 'Site principal', 'statut' => 'actif']
-        );
+        // Le site par défaut n'est créé que sur une instance sans aucun site :
+        // renommé ou recodé en prod, il ne doit pas être recréé au déploiement.
+        $site = Site::query()->where('code', 'PRINCIPAL')->first()
+            ?? Site::query()->oldest('id')->first()
+            ?? Site::query()->create(['code' => 'PRINCIPAL', 'nom' => 'Site principal', 'statut' => 'actif']);
 
         // Rattache les points de vente qui ne seraient liés à aucun site.
         PointDeVente::query()

@@ -14,6 +14,13 @@ class UniteDeMesureSeeder extends Seeder
 {
     public function run(): void
     {
+        // Défauts d'une instance neuve : dès que la table a servi, on n'y touche
+        // plus, sinon un élément supprimé ou renommé en prod reviendrait à
+        // chaque déploiement.
+        if (UniteDeMesure::query()->exists()) {
+            return;
+        }
+
         collect([
             ['libelle' => 'Kilogramme', 'symbole' => 'kg'],
             ['libelle' => 'Litre', 'symbole' => 'L'],
